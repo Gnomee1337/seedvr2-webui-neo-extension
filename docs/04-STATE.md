@@ -5,8 +5,9 @@
 
 ## Where we stopped
 
-**Branches.** `main` (fork of the original Chinese repository) and `docs/migrate-to-protocol` — the move onto the
-protocol plus the live-test results; not merged into `main`. No releases or tags.
+**Branches.** `main` (fork of the original Chinese repository) holds the move onto the protocol and the live-test
+results; local `main` is 2 commits ahead of `origin/main` — **not pushed**, waiting for the owner's consent.
+Current work: `feature/b05-model-discovery`. No releases or tags.
 
 The project runs on the protocol: English docs in `docs/`, README and the script's comments translated,
 `.gitignore` rewritten in UTF-8. Code behaviour is unchanged. Known problems are in `07-RISKS.md`,
