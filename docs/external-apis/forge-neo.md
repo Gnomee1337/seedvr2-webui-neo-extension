@@ -8,8 +8,11 @@ Forge Neo changes often; re-check a fact against the current `neo` branch before
 Public GitHub repository, no keys.
 
 ## Common pitfalls
-- **`gguf` is not a pip dependency of Forge Neo.** Neo ships its own copy as `modules_forge.packages.gguf`
-  (`backend/loader_gguf.py`); `requirements.txt` has no `gguf`. Extensions that `import gguf` must install it. Source: verified in source.
+- **A plain `import gguf` works inside Forge Neo without the pip package.** Neo ships its own copy in
+  `modules_forge/packages/gguf` (used by `backend/loader_gguf.py`; `requirements.txt` has no `gguf`) and puts
+  `modules_forge/packages` first on `sys.path` at startup (`modules_forge/initialization.py`). So extensions get the bundled
+  copy; the venv's own Python, run outside Forge, does not see it. Source: verified in a Neo install's source and in a live
+  run (a Q6_K `.gguf` loaded); re-check against the current `neo` branch before relying on it.
 - **`requirements.txt` of an extension is not read.** The launcher runs only `<extension>/install.py`
   (`modules/launch_utils.py`, `run_extension_installer`); `preload.py` is also supported (`modules/script_loading.py`). Source: verified in source.
 - **The extension root `__init__.py` is never imported**; only `scripts/*.py` are loaded as scripts. Source: verified in source (`modules/scripts.py`, `list_scripts`).

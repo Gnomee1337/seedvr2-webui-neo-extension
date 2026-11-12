@@ -16,7 +16,7 @@ The source of truth is the code.
 
 **Writes:** packages into the WebUI's Python environment.
 **On failure:** Forge prints the error and continues; the extension fails later on import (`ImportError` → empty result with an error message).
-**Known gap:** `gguf` is not installed, so `.gguf` models fail (`07-RISKS.md` §2).
+`gguf` is not installed: Forge Neo's bundled copy is used (`external-apis/forge-neo.md`).
 
 ## 2. Building the UI  🟡
 **Trigger:** Forge builds the txt2img and img2img tabs (startup, "Reload UI").
@@ -56,14 +56,16 @@ The source of truth is the code.
 5. Generation context: reuse `self.runner_cache['ctx']` or create one on `cuda:0`, tensors offloaded to CPU.
 6. `prepare_runner`: DiT/VAE taken from `GlobalModelCache` (ids `forge_dit` / `forge_vae`) if the file name matches,
    otherwise loaded; config `configs_7b` if the DiT file name contains `7b`, else `configs_3b`. Tiling from the UI.
-   Fixed: no BlockSwap, no offload, `sdpa` attention, no `torch.compile`.
+   Fixed: no BlockSwap, no DiT/VAE offload device, `sdpa` attention, no `torch.compile`.
+   Compute dtype is bf16 whenever the bf16 probe passes, including GPUs that only emulate it.
 7. Text embeddings loaded once per context.
 8. Phases 1–4: encode (VAE) → upscale (DiT, one step) → decode (VAE) → post-process (LAB color correction).
    Interruption is checked between phases.
 9. Output tensor → PIL; `SeedVR2 Model` and `SeedVR2 Resolution` added to the generation parameters;
    saved to `p.outpath_samples` with `-seedvr2`; returned as the only image of the result.
 
-**Writes:** one image file per run (plus `-original` if chosen); the models stay on the GPU.
+**Writes:** one image file per run (plus `-original` if chosen). After each phase the model is moved to CPU, so
+DiT and VAE stay cached in system RAM, not VRAM; the SD checkpoint (if unloaded) reloads on the next generation.
 **On failure:** interruption → the input image is returned; any other exception → traceback in the console,
 empty result with `Runtime Error: …`. The cached context may keep partial state.
 **Why:** `05-DECISIONS.md` → "VRAM and caching".

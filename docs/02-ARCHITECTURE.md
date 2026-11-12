@@ -10,7 +10,7 @@ The source of truth is the code; this document is reconciled with it on every `/
 | Language | Python (the version of the user's Forge Neo, 3.10+) |
 | Host | Forge Neo (`Haoming02/sd-webui-forge-classic`, branch `neo`) — the extension runs inside its process |
 | UI | Gradio components of the host |
-| ML | PyTorch, torchvision, einops, diffusers, OmegaConf, `rotary-embedding-torch`, `gguf` (GGUF models only), OpenCV (alpha upscaling) |
+| ML | PyTorch, torchvision, einops, diffusers, OmegaConf, `rotary-embedding-torch`, `gguf` (GGUF models only; Forge Neo's bundled copy), OpenCV (alpha upscaling) |
 | Database | none |
 | Packages | `install.py` (run by Forge at launch); `requirements.txt` is informational — Forge does not read it |
 | Runtime | inside Forge Neo, single CUDA GPU (`cuda:0` is hard-coded) |
