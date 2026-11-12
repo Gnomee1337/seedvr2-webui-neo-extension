@@ -1,0 +1,59 @@
+# Roadmap
+
+Blocks of work, their weight (how much work, 1–5) and status. How each process works —
+`docs/09-PROCESSES.md`; why we decided so — `docs/05-DECISIONS.md`; block cards of open
+blocks — `docs/roadmap-blocks/`.
+
+## How the percentage is calculated
+
+```
+PROGRESS = (sum of weights of ✅ blocks) / (sum of weights of ALL blocks) × 100, rounded down
+```
+
+- A block counts **only as a whole**: all acceptance criteria met and agent checks passed.
+- "Code written and tests green" is not ✅ yet. A block that works but that the owner has not
+  confirmed with a live example stays 🔄.
+- A new idea = a new block with a weight; the percentage honestly drops (the project grew, it did not regress).
+- The percentage is recalculated by the `plan-drift-checker` agent, not the main chat.
+
+**Statuses:** ✅ closed · 🔄 in progress or awaiting live check · ⏸ done but switched off · ⬜ not started.
+
+**Weight:** 1 — up to an hour or two · 2 — half a day · 3 — a day · 4 — a couple of days · 5 — a week or more / many unknowns.
+
+## Summary
+
+**Sum of weights: 23. Closed: 4. PROGRESS: 17%.** (Initial estimate from the migration — confirm with `/progress`.)
+
+## Delivery requirements (REQ-1…REQ-6, details — `docs/01-VISION.md`)
+
+| # | Block | Req. | Weight | Status | What remains |
+|---|---|---|---|---|---|
+| B04 | Repo hygiene: `.pyc` out of git, unused import, `requirements.txt`, LICENSE + attribution, `src` package name | REQ-5 | 2 | ⬜ | everything except the UTF-8 `.gitignore` |
+| B05 | Install and model discovery: `gguf` in `install.py`, one model folder, refresh button, empty-folder message, model size not by file name | REQ-1 | 2 | ⬜ | all |
+| B06 | VRAM lifecycle: unload/offload SeedVR2 after run, real Force Reload, Forge device, context reset on error, BlockSwap/offload in the UI, 8 GB / no-bf16 GPUs | REQ-3, REQ-4 | 4 | ⬜ | all |
+| B07 | Correct results: every image of a batch (not the grid), RGB conversion, infotext, respect save settings, empty-result guard | REQ-2 | 3 | ⬜ | all |
+| B09 | Tests with Forge stubs + GitHub Actions (ruff + pytest) | REQ-6 | 3 | ⬜ | all |
+
+## UX
+
+| # | Block | Weight | Status | What remains |
+|---|---|---|---|---|
+| B08 | Settings and feedback: color-correction and attention-mode choice, Forge progress bar, interrupt inside the DiT step, title without "(24G)" | 2 | ⬜ | all |
+
+## Foundation
+
+| # | Block | Weight | Status |
+|---|---|---|---|
+| B01 | Vendored SeedVR2 pipeline (ComfyUI port v2.5.24) runnable outside ComfyUI | 3 | ✅ |
+| B02 | Forge Script: UI, txt2img/img2img flow, model caching | 3 | 🔄 works per the original author; awaiting the owner's live check on current Forge Neo |
+| B03 | Project moved onto the protocol: English docs, translated README and comments | 1 | ✅ |
+
+## How to check the sum
+Add up the "Weight" column across all tables — it must match "Sum of weights" in "Summary":
+B04 2 + B05 2 + B06 4 + B07 3 + B09 3 + B08 2 + B01 3 + B02 3 + B03 1 = **23**.
+Add up the weights of ✅ rows — that is "Closed": B01 3 + B03 1 = **4**.
+
+## Why this order
+B05 first: without `gguf` and a correct model folder most users cannot run the extension at all. B04 is small and
+removes noise before real changes. B06 and B07 are the main user-visible bugs (OOM after a run, wrong image in batches).
+B09 can start in parallel with B06/B07 — the script logic is easier to fix with tests around it. B08 is polish.

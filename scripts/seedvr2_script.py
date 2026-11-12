@@ -10,20 +10,20 @@ import numpy as np
 from PIL import Image
 import random 
 
-# 引入显存管理模块
+# Forge model management (used to unload the SD checkpoint and free VRAM)
 import modules.sd_models
 
-# 定义扩展根目录
+# Extension root directory
 EXTENSION_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 MODEL_DIR = os.path.join(EXTENSION_ROOT, "models", "SeedVR2") 
 
-# 如果默认目录不存在，尝试查找 WebUI 主目录的 models
+# If the default directory does not exist, fall back to the WebUI's own models directory
 if not os.path.exists(MODEL_DIR):
     MODEL_DIR_FALLBACK = os.path.join(shared.models_path, "SeedVR2")
     if os.path.exists(MODEL_DIR_FALLBACK):
         MODEL_DIR = MODEL_DIR_FALLBACK
 
-# 定义一个自定义异常，用于优雅地中断 SeedVR2
+# Custom exception used to stop SeedVR2 cleanly when the user presses Interrupt
 class SeedVR2Interrupted(Exception):
     pass
 
@@ -35,7 +35,7 @@ class Script(scripts.Script):
         return True
 
     def ui(self, is_img2img):
-        # --- 文件扫描 ---
+        # --- Scan for model files ---
         all_files = []
         if os.path.exists(MODEL_DIR):
             all_files = [f for f in os.listdir(MODEL_DIR) if f.endswith(".gguf") or f.endswith(".safetensors")]
@@ -80,13 +80,13 @@ class Script(scripts.Script):
         if EXTENSION_ROOT not in sys.path:
             sys.path.insert(0, EXTENSION_ROOT)
         
-        # --- 定义中断检查回调函数 ---
+        # --- Interruption check, passed to the pipeline as a progress callback ---
         def check_interruption(*args, **kwargs):
-            # ★★★ 修复：移除 .stopping 检查，只保留 .interrupted ★★★
+            # Only .interrupted is checked; the .stopping check was removed on purpose
             if shared.state.interrupted:
                 raise SeedVR2Interrupted("User interrupted generation.")
 
-        # --- Txt2Img 自动劫持 ---
+        # --- txt2img: generate the base image first, then upscale it ---
         if isinstance(p, StableDiffusionProcessingTxt2Img):
             if debug_mode: print("[SeedVR2] Generating base image (txt2img)...")
             
@@ -105,10 +105,10 @@ class Script(scripts.Script):
                 if current_script and p.scripts:
                     p.scripts.scripts.append(current_script)
             
-            # ★★★ 修复：移除 .stopping 检查 ★★★
+            # Only .interrupted is checked (see check_interruption)
             if shared.state.interrupted:
                 print("[SeedVR2] Interrupted during Txt2Img generation. Stopping SeedVR2.")
-                return processed_base # 直接返回半成品
+                return processed_base # return the base image as is
 
             input_img = processed_base.images[0]
             
@@ -116,20 +116,20 @@ class Script(scripts.Script):
                  images.save_image(input_img, p.outpath_samples, "", processed_base.seed, p.prompt, shared.opts.samples_format, info=processed_base.info, p=p, suffix="-original")
             
         else:
-            # Img2Img 模式
-            # ★★★ 修复：移除 .stopping 检查 ★★★
+            # img2img mode: the diffusion pass is skipped, the input image is upscaled directly
+            # Only .interrupted is checked (see check_interruption)
             if shared.state.interrupted:
                  return Processed(p, [], p.seed, "Interrupted")
             input_img = p.init_images[0]
 
-        # --- 显存清理 ---
+        # --- Free VRAM ---
         if unload_sd:
             if debug_mode: print("[SeedVR2] Unloading SD models...")
             modules.sd_models.unload_model_weights()
             import modules.devices as devices
             devices.torch_gc()
 
-        # --- Seed 处理 ---
+        # --- Resolve the seed ---
         if seed == -1:
             if hasattr(p, 'all_seeds') and p.all_seeds is not None and len(p.all_seeds) > 0 and p.all_seeds[0] != -1:
                 actual_seed = int(p.all_seeds[0])
@@ -188,10 +188,10 @@ class Script(scripts.Script):
         except ImportError as e:
             return Processed(p, [], p.seed, f"Error: {e}")
 
-        # 图像预处理
+        # Image preprocessing: PIL -> [1, H, W, C] float16 tensor
         img_tensor = transforms.ToTensor()(input_img).unsqueeze(0).permute(0, 2, 3, 1).to(dtype=torch.float16)
         
-        # 缓存管理
+        # Generation-context cache (kept on the Script instance between runs)
         if not hasattr(self, 'runner_cache'):
             self.runner_cache = {}
             
@@ -273,7 +273,7 @@ class Script(scripts.Script):
                                           progress_callback=check_interruption, 
                                           color_correction="lab", prepend_frames=0, temporal_overlap=0, batch_size=1)
 
-            # 输出转换
+            # Convert the output tensor back to a PIL image
             output_tensor = ctx['final_video']
             tensor_f32 = output_tensor[0].cpu().to(dtype=torch.float32)
             tensor_f32 = torch.clamp(tensor_f32, 0, 1)
@@ -281,7 +281,7 @@ class Script(scripts.Script):
             out_np = (tensor_f32.numpy() * 255.0).astype(np.uint8)
             out_pil = Image.fromarray(out_np)
 
-            # 保存
+            # Save the result
             p.extra_generation_params["SeedVR2 Model"] = dit_model_name
             p.extra_generation_params["SeedVR2 Resolution"] = resolution
             
