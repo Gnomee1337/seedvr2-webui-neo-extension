@@ -8,7 +8,7 @@ from typing import Any, Dict, List, Optional, Tuple
 
 import gradio as gr
 from modules import scripts, processing, images, shared, devices
-from modules.processing import Processed, create_infotext, StableDiffusionProcessingTxt2Img
+from modules.processing import Processed, StableDiffusionProcessingTxt2Img
 from modules.ui_common import refresh_symbol
 from modules.ui_components import FormRow, ToolButton
 from torchvision import transforms
@@ -32,7 +32,7 @@ from seedvr2_neo.model_discovery import ModelScan, describe_missing_models, find
 from seedvr2_neo.model_lifecycle import DIT_CACHE_ID, VAE_CACHE_ID, ModelLifecycle
 from seedvr2_neo.run_inputs import (group_by_shape, resolve_seed, select_distinct_images, select_generated_images,
                                     to_pipeline_image)
-from seedvr2_neo.run_results import (RunImage, SavePlan, append_generation_params, failure_generation_params,
+from seedvr2_neo.run_results import (BaseInfotext, InputDetails, RunImage, SavePlan, failure_generation_params,
                                      merge_run_images, plan_saving, seedvr2_generation_params)
 
 # File name suffixes of the saved upscaled image and of the extra copy of the image before the upscale.
@@ -136,60 +136,50 @@ def tensor_to_images(frames: torch.Tensor) -> List[Image.Image]:
     return [Image.fromarray((frame.numpy() * 255.0).astype(np.uint8)) for frame in frames]
 
 
-def fill_img2img_infotext_fields(p, image_count: int, seed: int) -> None:
-    """Set the per-image lists `create_infotext` reads. txt2img gets them from `process_images`; img2img skips it, so
-    they are unset — or left from the previous file of an img2img Batch run, which reuses `p`."""
-    p.all_prompts = [p.prompt] * image_count
-    p.all_negative_prompts = [p.negative_prompt] * image_count
-    p.all_seeds = [seed] * image_count
-    p.all_subseeds = [p.subseed] * image_count
+def describe_txt2img_inputs(p, base_infotexts: List[str], count: int) -> List[InputDetails]:
+    """Seed, prompt and Forge's own infotext of each generated image; they are in `p.all_seeds` order (`count` is
+    never more than `len(p.all_seeds)`). A missing infotext gives an image with only the SeedVR2 parameters."""
+    return [InputDetails(p.all_seeds[index], p.all_prompts[index],
+                         BaseInfotext.from_forge(base_infotexts[index] if index < len(base_infotexts) else ""))
+            for index in range(count)]
 
 
-def save_originals(p, inputs: List[Image.Image], base_infotexts: List[str]) -> None:
+def describe_img2img_inputs(p, seed: int, count: int) -> List[InputDetails]:
+    """img2img inputs have no seed or infotext of their own: the SeedVR2 seed and the prompt from the UI. `p` is not
+    changed — the Batch tab reuses it for the next file."""
+    details = InputDetails(seed, p.prompt, BaseInfotext.from_prompt(p.prompt, p.negative_prompt))
+    return [details] * count
+
+
+def save_originals(p, inputs: List[Image.Image], details: List[InputDetails]) -> None:
     """Save the images before the upscale with an `-original` suffix (only when Forge did not save them itself)."""
-    for index, image in enumerate(inputs):
-        info = base_infotexts[index] if index < len(base_infotexts) else None
-        save_result_image(p, image, index, info, ORIGINAL_SUFFIX)
+    for index, (image, input_details) in enumerate(zip(inputs, details)):
+        save_result_image(p, image, index, input_details, input_details.infotext.with_params({}), ORIGINAL_SUFFIX)
 
 
-def save_result_image(p, image: Image.Image, index: int, infotext: Optional[str], suffix: str) -> None:
+def save_result_image(p, image: Image.Image, index: int, details: InputDetails, infotext: str, suffix: str) -> None:
     """Save one image next to Forge's own outputs. A failed write is reported and skipped, so the other images are
     still saved and shown."""
     try:
-        images.save_image(image, p.outpath_samples, "", p.all_seeds[index], p.all_prompts[index],
-                          shared.opts.samples_format, info=infotext, p=p, suffix=suffix)
-    except (OSError, ValueError, IndexError) as e:
+        images.save_image(image, p.outpath_samples, "", details.seed, details.prompt, shared.opts.samples_format,
+                          info=infotext, p=p, suffix=suffix)
+    except (OSError, ValueError) as e:
         print(f"❌ [SeedVR2] Cannot save image {index + 1}: {type(e).__name__}: {e}")
 
 
-def build_result(p, run_images: List[RunImage], base_infotexts: List[str], params: Dict[str, Any],
+def build_result(p, run_images: List[RunImage], details: List[InputDetails], params: Dict[str, Any],
                  failure: Optional[str], result_seed: int, save_plan: SavePlan) -> Processed:
     """One image and one infotext per input, in input order (Forge pairs them by index). Upscaled images carry the
-    SeedVR2 parameters and are saved by the user's settings; the others carry the reason they were not upscaled."""
-    failure_params = failure_generation_params(failure or "not upscaled")
+    SeedVR2 parameters and are saved by the user's settings; the others also carry the reason they were not upscaled."""
+    failure_params = failure_generation_params(params, failure or "not upscaled")
     infotexts = []
-    for index, run_image in enumerate(run_images):
-        base_infotext = base_infotexts[index] if index < len(base_infotexts) else ""
-        infotext = make_infotext(p, index, params if run_image.is_upscaled else failure_params, base_infotext)
+    for index, (run_image, input_details) in enumerate(zip(run_images, details)):
+        infotext = input_details.infotext.with_params(params if run_image.is_upscaled else failure_params)
         infotexts.append(infotext)
         if run_image.is_upscaled and save_plan.save_results:
-            save_result_image(p, run_image.image, index, infotext, RESULT_SUFFIX)
+            save_result_image(p, run_image.image, index, input_details, infotext, RESULT_SUFFIX)
     return Processed(p, [run_image.image for run_image in run_images], result_seed, infotexts[0], infotexts=infotexts)
 
-
-def make_infotext(p, index: int, extra_params: Dict[str, Any], base_infotext: str) -> str:
-    """Forge's infotext of image `index` with `extra_params` added. `p.extra_generation_params` is shared by all images,
-    so it is restored afterwards. If Forge cannot build it, the base image's infotext plus the parameters is used."""
-    saved_params = dict(p.extra_generation_params)
-    p.extra_generation_params.update(extra_params)
-    try:
-        return create_infotext(p, p.all_prompts, p.all_seeds, p.all_subseeds, index=index)
-    except Exception as e:  # Forge's infotext reads many fields of `p`; a missing one must not lose the image
-        print(f"[SeedVR2] Cannot build the infotext of image {index + 1}: {type(e).__name__}: {e}")
-        return append_generation_params(base_infotext, extra_params)
-    finally:
-        p.extra_generation_params.clear()
-        p.extra_generation_params.update(saved_params)
 
 class Script(scripts.Script):
     def title(self):
@@ -295,28 +285,29 @@ class Script(scripts.Script):
             inputs = select_generated_images(processed_base.images, processed_base.index_of_first_image, generated_count)
             base_infotexts = select_generated_images(processed_base.infotexts, processed_base.index_of_first_image,
                                                      generated_count)
-            result_seed = processed_base.seed
         else:
             # img2img: the diffusion pass is skipped, the input images are upscaled directly
             if shared.state.interrupted:
                 return empty_result(p, "Interrupted")
             inputs = select_distinct_images(p.init_images or [])
-            base_infotexts = []
         if not inputs:
             print("❌ [SeedVR2] There is no image to upscale.")
             return empty_result(p, "SeedVR2: there is no image to upscale")
 
         # img2img images have no seeds of their own; `p.all_seeds` there may be left from the previous Batch tab file
         actual_seed = resolve_seed(seed, p.all_seeds if is_txt2img else None, p.seed)
-        if not is_txt2img:
-            fill_img2img_infotext_fields(p, len(inputs), actual_seed)
+        if is_txt2img:
+            details = describe_txt2img_inputs(p, base_infotexts, len(inputs))
+            result_seed = processed_base.seed
+        else:
+            details = describe_img2img_inputs(p, actual_seed, len(inputs))
             result_seed = actual_seed
         if debug_mode:
             print(f"[SeedVR2] Active. DiT: {dit_model_name} | Seed: {actual_seed} | Images: {len(inputs)}")
 
         save_plan = plan_saving(is_txt2img, p.save_samples(), bool(p.do_not_save_samples), parse_flag(save_original))
         if save_plan.save_originals:
-            save_originals(p, inputs, base_infotexts)
+            save_originals(p, inputs, details)
 
         # --- Free VRAM ---
         if unload_sd:
@@ -333,7 +324,7 @@ class Script(scripts.Script):
         upscaled, failure = self._upscale_images(pipeline, inputs, request, force_reload, debug_mode)
 
         params = seedvr2_generation_params(dit_model_name, vae_model_name, request.resolution, actual_seed)
-        return build_result(p, merge_run_images(inputs, upscaled), base_infotexts, params, failure, result_seed,
+        return build_result(p, merge_run_images(inputs, upscaled), details, params, failure, result_seed,
                             save_plan)
 
     def _generate_base_images(self, p) -> Processed:

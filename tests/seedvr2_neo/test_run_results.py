@@ -53,24 +53,56 @@ def test_success_params_name_models_resolution_and_seed():
                       "SeedVR2 Resolution": 1080, "SeedVR2 Seed": 42}
 
 
-def test_failure_param_carries_the_message():
-    assert rr.failure_generation_params("Interrupted") == {"SeedVR2 Error": "Interrupted"}
+def test_failure_params_keep_the_attempt_and_add_the_message():
+    # Forge parses the last line as parameters only with 3+ of them, so the SeedVR2 keys stay
+    params = rr.seedvr2_generation_params("dit", "vae", 1080, 42)
+
+    failed = rr.failure_generation_params(params, "Interrupted")
+
+    assert failed == {**params, "SeedVR2 Error": "Interrupted"}
+    assert params == rr.seedvr2_generation_params("dit", "vae", 1080, 42)  # not mutated
 
 
-def test_params_are_appended_to_the_parameter_line():
-    infotext = "a cat\nNegative prompt: dog\nSteps: 20, Seed: 1"
+# --- BaseInfotext ---
 
-    result = rr.append_generation_params(infotext, {"SeedVR2 Seed": 42})
+def test_forge_infotext_gets_params_on_its_parameter_line():
+    base = rr.BaseInfotext.from_forge("a cat\nNegative prompt: dog\nSteps: 20, Seed: 1")
 
-    assert result == "a cat\nNegative prompt: dog\nSteps: 20, Seed: 1, SeedVR2 Seed: 42"
+    assert base.with_params({"SeedVR2 Seed": 42}) == "a cat\nNegative prompt: dog\nSteps: 20, Seed: 1, SeedVR2 Seed: 42"
 
 
-def test_params_without_base_infotext_stand_alone():
-    assert rr.append_generation_params("", {"SeedVR2 Seed": 42}) == "SeedVR2 Seed: 42"
+def test_forge_infotext_without_prompt_is_only_a_parameter_line():
+    # Forge strips the empty prompt, leaving just the parameters
+    assert rr.BaseInfotext.from_forge("Steps: 20").with_params({"SeedVR2 Seed": 42}) == "Steps: 20, SeedVR2 Seed: 42"
+
+
+def test_img2img_prompt_gets_a_new_parameter_line():
+    base = rr.BaseInfotext.from_prompt("a cat", "dog")
+
+    assert base.with_params({"SeedVR2 Seed": 42}) == "a cat\nNegative prompt: dog\nSeedVR2 Seed: 42"
+
+
+def test_img2img_without_negative_prompt_has_no_negative_line():
+    assert rr.BaseInfotext.from_prompt("a cat", "").with_params({"K": 1}) == "a cat\nK: 1"
+
+
+def test_img2img_without_any_prompt_is_only_the_parameter_line():
+    assert rr.BaseInfotext.from_prompt("", "").with_params({"K": 1}) == "K: 1"
+
+
+def test_multiline_prompt_keeps_its_lines():
+    base = rr.BaseInfotext.from_forge("line one\nline two\nSteps: 20")
+
+    assert base.with_params({"K": 1}) == "line one\nline two\nSteps: 20, K: 1"
 
 
 def test_no_params_leave_the_infotext_unchanged():
-    assert rr.append_generation_params("Steps: 20", {}) == "Steps: 20"
+    assert rr.BaseInfotext.from_forge("a cat\nSteps: 20").with_params({}) == "a cat\nSteps: 20"
+
+
+def test_empty_or_missing_forge_infotext_gives_only_the_params():
+    assert rr.BaseInfotext.from_forge("").with_params({"K": 1}) == "K: 1"
+    assert rr.BaseInfotext.from_forge(None).with_params({"K": 1}) == "K: 1"
 
 
 @pytest.mark.parametrize("value", ["CUDA out of memory, tried 2 GB", "Runtime Error: x", "two\nlines", 'say "hi"'])
