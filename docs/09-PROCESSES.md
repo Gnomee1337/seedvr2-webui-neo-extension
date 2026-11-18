@@ -62,8 +62,8 @@ The source of truth is the code.
 0. The same model check and pipeline import as in process 3, step 0.
 1. The img2img diffusion pass is skipped; every distinct object of `p.init_images` is an input (the Batch tab passes one
    file as `[image] * batch_size`; mask, denoise and resize settings are ignored). None → the empty result of process 3, step 3.
-2. `p.all_prompts`, `all_negative_prompts`, `all_seeds` (the SeedVR2 seed), `all_subseeds` are set for the inputs —
-   `process_images` is not called, and the Batch tab reuses `p` between files.
+2. Each input gets the SeedVR2 seed and the UI prompt for its file name and infotext; `p` is not changed (the Batch
+   tab reuses it between files).
 3. Continue with the common upscale (process 5).
 
 ## 5. SeedVR2 upscale (common part)  🟡
@@ -97,11 +97,12 @@ The source of truth is the code.
 10. End of run (`seedvr2_neo/model_lifecycle.py`): "Keep in RAM" after all groups succeeded → models stay cached
    in system RAM (the pipeline moves them off the GPU after their phase); otherwise — "Unload", an error or an
    interrupt — both models are removed from the cache. Either way `gc.collect()` + `devices.torch_gc()`; the console says which.
-11. Result (`build_result` in the script): one image and one infotext per input, in input order. An upscaled image gets
-   Forge's infotext for its index plus `SeedVR2 Model`, `SeedVR2 VAE`, `SeedVR2 Resolution`, `SeedVR2 Seed` (added to
-   `p.extra_generation_params` only while it is built), and is saved to `p.outpath_samples` with `-seedvr2` by the
-   saving plan. An image not upscaled (interrupt or error) comes back as its input with `SeedVR2 Error: <reason>`
-   and is not saved. If Forge cannot build the infotext, the base infotext (or nothing) plus the SeedVR2 keys is used.
+11. Result (`build_result` in the script): one image and one infotext per input, in input order. The infotext is the
+   base one (`BaseInfotext` in `seedvr2_neo/run_results.py`: Forge's infotext of the generated image in txt2img; the
+   prompt and `Negative prompt:` line in img2img) with `SeedVR2 Model`, `SeedVR2 VAE`, `SeedVR2 Resolution`,
+   `SeedVR2 Seed` added to its parameters line. Forge's `create_infotext` is not used: it reads the SD model, which is
+   unloaded (or never loaded) by then. An upscaled image is saved to `p.outpath_samples` with `-seedvr2` by the saving
+   plan. An image not upscaled (interrupt or error) comes back as its input with `SeedVR2 Error: <reason>` added and is not saved.
 
 **Writes:** one `-seedvr2` file per upscaled image when saving is on, plus `-original` files by the saving plan. A
 failed write is printed and skipped. The SD checkpoint (if unloaded) reloads on the next generation.

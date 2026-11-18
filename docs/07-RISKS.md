@@ -105,9 +105,9 @@ Live-checked on an 8 GB GPU without bf16, 16 GB RAM, 1080px output, VAE tile 512
   for "After run" and BlockSwap: unload, BlockSwap off.
 
 ## 4. Generation flow and results
-- 🟡 R4 (S2×L2) **B07 result handling is checked with stubs only until the live run.** Batches, infotexts, saving and
-  odd image modes passed a stubbed `run()` and unit tests; real Forge `create_infotext` / `save_image` / Batch tab not
-  yet run (acceptance in the B07 card). If `create_infotext` fails, the fallback infotext lacks Forge's fields.
+- 🟡 R6 (S2×L3) **With `--cuda-malloc` a batch multiplies the VAE-decode spill** (section 3): live, 3B GGUF, 4 × 512→1024 px,
+  tile 512 on an 8 GB GPU — each frame decoded in 90–160 s with VRAM full (vs ~10 s without the flag); the run took
+  ~12 min. Not caused by batching, but users with batches feel it most.
 - 🟡 R4 (S2×L2) **A large batch holds all frames in RAM at once.** One pass keeps the inputs, latents and outputs of
   the whole group (on CPU): 8 images at 2048 px are a few hundred MB plus the pipeline's own copies. Not measured.
 - 🟢 R3 (S1×L3) **The interrupt or an error loses the whole group in progress.** Images of one size are one pass, so
@@ -140,7 +140,7 @@ Live-checked on an 8 GB GPU without bf16, 16 GB RAM, 1080px output, VAE tile 512
 
 ## Top risks
 1. 🟡 R6 VAE decode spills with `--cuda-malloc` — section 3.
-2. 🟡 R4 B07 result handling not yet run in a live Forge — section 4.
+2. 🟡 R6 A batch multiplies the `--cuda-malloc` decode spill — section 4.
 3. 🟡 R4 Corrupt GGUF header can hang the WebUI — section 1.
 4. 🟡 R4 7B with too few BlockSwap blocks; VAE tile 1024 spills on 8 GB — section 3.
 5. 🟡 R4 A large batch holds all frames in RAM — section 4.

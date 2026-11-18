@@ -24,6 +24,9 @@ Public GitHub repository, no keys.
 - **The extension root `__init__.py` is never imported**; only `scripts/*.py` are loaded as scripts. Source: verified in source (`modules/scripts.py`, `list_scripts`).
 - **`process_images` returns the grid first.** With more than one image and `opts.return_grid`, `output_images.insert(0, grid)`
   and `index_of_first_image = 1` (`modules/processing.py`). Source: verified in source.
+- **`create_infotext` needs a loaded SD checkpoint.** With none loaded (right after start Neo holds a `FakeInitialModel`)
+  it raises `AttributeError: 'FakeInitialModel' object has no attribute 'use_distilled_cfg_scale'`, so a script that
+  unloads the checkpoint cannot build infotexts afterwards. Source: live run (img2img through the API, Neo `neo-2.31`).
 - Neo's requirements do not include `peft`, `rotary-embedding-torch`, `matplotlib`. Source: `requirements.txt`, verified in source.
 
 ## Limits and load

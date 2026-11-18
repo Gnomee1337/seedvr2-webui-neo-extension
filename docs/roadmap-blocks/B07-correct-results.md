@@ -74,8 +74,16 @@ Own assumptions:
 - Not verified: `save_images` API default, whether a script must call `fix_seed`.
 
 ## Progress
-Steps 1–6 done: helpers + tests (1064 passed), script rewritten, stubbed smoke run of `run()` (batch + grid, odd modes,
-error in the second group, empty base, Batch-tab repeats) passed, docs updated. Step 7 (live run) is next.
+Steps 1–6 done: helpers + tests (1069 passed), script rewritten, stubbed smoke run of `run()` (batch + grid, odd modes,
+error in the second group, empty base, Batch-tab repeats), docs updated.
+Step 7, live run through Forge's API (3B GGUF, 8 GB GPU), all passed: img2img L/P/RGBA (3 images, RGB/RGB/RGBA, alpha
+kept, 3 files, prompt + SeedVR2 keys in infotexts); img2img `save_images=False` → no files; img2img interrupt during
+the upscale → 2 inputs back with `SeedVR2 Error: Interrupted`, no files; txt2img 2×2 with grid on, 512→1024 → 4
+images, 4 seeds, 4 `-seedvr2` files, no `-original` duplicate; txt2img with "Always save" off → no files. VRAM after
+each run 0.55–0.85 GB. The live run found that `create_infotext` fails with the checkpoint unloaded → infotexts are
+now built from Forge's base infotext (`BaseInfotext`).
+Left for the owner (UI only): "Send to txt2img" from an img2img result; img2img Batch tab with 2 files.
+Empty base result: stubs only (cannot be produced through the API).
 
 ## Agreed with the owner
 - No grid of the upscaled images: only the images themselves are returned.

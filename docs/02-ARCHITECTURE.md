@@ -65,7 +65,7 @@ None of its own: the UI lives inside the txt2img / img2img tabs.
 - `seedvr2_script.py` — the whole Forge integration: UI controls, the model refresh button and the 7B low-VRAM note,
   the model check and pipeline import before a run, collecting the images to upscale (txt2img base images / img2img
   inputs), running the four phases on Forge's device with a fresh generation context per group of same-sized images,
-  the process-wide `MODEL_LIFECYCLE`, per-image infotexts (`create_infotext`) and saving (`-seedvr2`, `-original`),
+  the process-wide `MODEL_LIFECYCLE`, per-image infotexts and saving (`-seedvr2`, `-original`),
   interruption via `shared.state.interrupted`.
 
 ### seedvr2_neo/
@@ -81,7 +81,8 @@ No Forge, Gradio or torch imports; tested outside Forge.
 - `run_inputs.py` (Pillow only) — `select_generated_images` (skip the grid and extras), `select_distinct_images`
   (Batch tab repeats), `to_pipeline_image` (any mode → RGB / RGBA), `group_by_shape`, `resolve_seed`.
 - `run_results.py` — `plan_saving` → `SavePlan`; `GenerationParam` keys and `seedvr2_generation_params` /
-  `failure_generation_params`; `merge_run_images` → `RunImage` list (one per input); infotext fallback formatting.
+  `failure_generation_params`; `merge_run_images` → `RunImage` list (one per input); `BaseInfotext` (prompt part +
+  parameters line, from Forge's infotext or a bare prompt) and `InputDetails` (seed, prompt, base infotext per input).
 
 ### seedvr2_vendor/core/
 - `generation_utils.py` — `setup_generation_context` (devices, dtype), `prepare_runner`, `compute_generation_info`, `load_text_embeddings`.
