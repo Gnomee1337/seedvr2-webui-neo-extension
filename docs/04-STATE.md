@@ -37,5 +37,4 @@ hardware target — 8 GB GPU without bf16. The fork is public: `main` is what us
 
 ## Open questions for the owner
 
-- REQ-1 ("clean install from URL, `.safetensors` and `.gguf` without manual pip") is still ⬜: mark it done after a
-  fresh-install check, or now?
+None.
