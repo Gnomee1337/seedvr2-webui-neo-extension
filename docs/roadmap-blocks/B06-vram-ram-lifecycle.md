@@ -81,7 +81,8 @@ B05 (model discovery) — done. The owner's live runs in Forge Neo on an 8 GB GP
 Run Forge with the extension on this branch, an 8 GB GPU, 1080px output. Watch the console and Task Manager
 (Performance → GPU "Dedicated GPU memory", Memory "In use").
 1. 3B fp8, defaults (After run = Unload): clean image; console ends with "Models unloaded, memory released."; RAM and
-   dedicated GPU memory back near the levels before the run.
+   dedicated GPU memory back near the levels before the run; during the run RAM does not jump by the model's size at
+   the end of Phase 2 (the DiT is freed on the GPU, not copied to RAM first).
 2. Same, After run = Keep in RAM, two runs: the second has no model loading in the console ("Reusing cached runner" /
    cache hit); console says "Models kept in RAM for the next run."
 3. Keep in RAM + Force Reload on: the models are loaded from disk again.

@@ -77,15 +77,17 @@ The source of truth is the code.
    Fixed: `sdpa` attention, no `torch.compile`.
    Compute dtype is bf16 whenever the bf16 probe passes, including GPUs that only emulate it.
 7. Phases 1–4: encode (VAE) → upscale (DiT, one step; text embeddings loaded here) → decode (VAE) → post-process (LAB
-   color correction). Interruption is checked between phases. After each of the first three phases the allocator's
-   cached VRAM is returned (`devices.torch_gc()`).
+   color correction). Interruption is checked between phases. After each of the first three phases dropped objects
+   are collected and the allocator's cached VRAM is returned (`gc.collect()` + `devices.torch_gc()`). A model that is
+   not cached is freed in place on the GPU, without a copy to RAM (local patch, `external-apis/seedvr2-upstream.md`).
 8. Output tensor → PIL; `SeedVR2 Model` and `SeedVR2 Resolution` added to the generation parameters;
    saved to `p.outpath_samples` with `-seedvr2`; returned as the only image of the result.
-9. End of run (`seedvr2_neo/model_lifecycle.py`): "Keep in RAM" after a successful run → models stay cached in system
-   RAM (the pipeline moves them off the GPU after their phase); otherwise — "Unload", an error or an interrupt — both
-   models are removed from the cache. Either way `gc.collect()` + `devices.torch_gc()`; the console says which.
+9. End of run (`seedvr2_neo/model_lifecycle.py`): "Keep in RAM" after the four phases succeeded → models stay cached
+   in system RAM (the pipeline moves them off the GPU after their phase), even if saving the image then fails;
+   otherwise — "Unload", an error or an interrupt inside the pipeline — both models are removed from the cache.
+   Either way `gc.collect()` + `devices.torch_gc()`; the console says which.
 
 **Writes:** one image file per run (plus `-original` if chosen). The SD checkpoint (if unloaded) reloads on the next generation.
 **On failure:** interruption → the input image is returned; any other exception → traceback in the console,
-empty result with `Runtime Error: …`. In both cases the models are unloaded and nothing of the run is reused.
+empty result with `Runtime Error: …`. A failure inside the pipeline unloads the models; nothing of the run is reused.
 **Why:** `05-DECISIONS.md` → "VRAM and caching".

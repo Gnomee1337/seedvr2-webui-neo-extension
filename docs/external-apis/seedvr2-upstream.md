@@ -26,6 +26,10 @@ Changes we made to vendored files. Re-apply after every upstream sync. Each code
 - `seedvr2_vendor/utils/constants.py`, `get_vae_config_path` (new function) and its use in
   `seedvr2_vendor/core/model_configuration.py`, `_create_new_runner` (+ the import): the VAE config path is built from the
   package's own folder instead of upstream's folder name joined to the repository root. Test: `tests/seedvr2_vendor/test_package_paths.py`.
+- `seedvr2_vendor/optimization/memory_manager.py`, `cleanup_dit` and `cleanup_vae`: a model that is not cached is no
+  longer moved to the CPU before deletion on any device (upstream skips the move only on MPS). Why: `release_model_memory`
+  frees the GPU storage in place, so the move only put the whole model into system RAM right before dropping it — a
+  ~8 GB RAM peak for 7B fp8 in the default "Unload" mode. Not unit-tested (tests run without torch); checked live.
 - `__init__.py` (root, ComfyUI-only): imports `.seedvr2_vendor` instead of `.src`.
 - `requirements.txt` is not synced from upstream: ours lists only what the code imports (upstream's adds `peft`, `matplotlib`).
 
@@ -46,6 +50,14 @@ Changes we made to vendored files. Re-apply after every upstream sync. Each code
 - **Checkpoint layout:** DiT tensor names start with `blocks.<N>.` (`self.blocks` in `seedvr2_vendor/models/dit_*/nadit.py`); 3B has
   32 blocks, 7B has 36 (`num_layers` in `configs_*/main.yaml`). Checked on the official 3B fp16, 3B fp8 and 7B sharp fp8
   safetensors and the 3B Q6_K GGUF (detected as 3B from its header in a live run); 7B GGUF not checked.
+- **Import side effects:** importing the pipeline (through `optimization/compatibility.py`) puts stub modules into
+  `sys.modules` for `bitsandbytes` (and checks `triton`, `flash_attn`, `xformers`) when they are broken, and probes bf16
+  with a small matmul on `cuda:0`. The Forge script imports the pipeline at the start of `run()`, so on the first run
+  this happens before the base image is generated. Source: `seedvr2_vendor/optimization/compatibility.py` (shims at
+  import, `_probe_bfloat16_support`).
+- **The vendored code picks devices itself in places** (`cuda:0` in the bf16 probe, `get_device()` in BlockSwap); on a
+  CPU-only Forge BlockSwap fails with an error naming a `--dit_offload_device` CLI flag Forge does not have. Source:
+  `seedvr2_vendor/optimization/blockswap.py`, `validate_blockswap_config`.
 - **Text embeddings** are loaded with `torch.load(..., weights_only=True)` — no pickled code is executed. Source: `seedvr2_vendor/core/generation_utils.py`.
 
 ## Model files

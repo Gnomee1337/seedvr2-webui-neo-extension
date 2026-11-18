@@ -145,7 +145,7 @@ class Script(scripts.Script):
             after_run = gr.Radio(label="After run", choices=[option.value for option in AfterRun],
                                  value=AfterRun.UNLOAD.value,
                                  info="Unload frees VRAM and RAM; Keep in RAM makes the next run start faster")
-            blocks_to_swap = gr.Slider(label="BlockSwap: DiT blocks kept in RAM (0 = off)", minimum=0,
+            blocks_to_swap = gr.Slider(label="BlockSwap: DiT blocks kept in RAM", minimum=0,
                                        maximum=MAX_BLOCKS_TO_SWAP, step=1, value=0)
             swap_io_components = gr.Checkbox(label="BlockSwap: I/O layers too", value=False)
 
@@ -266,8 +266,8 @@ class Script(scripts.Script):
         model_cache = pipeline.get_global_cache()
         dit_path = os.path.join(scan.folder, dit_model_name)
         vae_path = os.path.join(scan.folder, vae_model_name)
-        if MODEL_LIFECYCLE.prepare_run(model_cache, dit_path, vae_path, force_reload) and debug_mode:
-            print("[SeedVR2] Cache cleared.")
+        if MODEL_LIFECYCLE.prepare_run(model_cache, dit_path, vae_path, force_reload):
+            print("[SeedVR2] Cached models dropped (Force Reload, other files or a previous failed run); loading from disk.")
 
         succeeded = False
         try:
@@ -333,8 +333,9 @@ class Script(scripts.Script):
     def _upscale_tensor(pipeline, img_tensor, request: UpscaleRequest, debug, debug_mode, check_interruption):
         """Run the four SeedVR2 phases on one [1, H, W, C] image tensor and return the pipeline's output tensor.
 
-        The generation context is built fresh every run, so nothing from a failed or interrupted run is reused. The
-        allocator's cached VRAM is returned after each phase, so the next phase does not spill into shared memory."""
+        The generation context is built fresh every run, so nothing from a failed or interrupted run is reused. After
+        each phase the dropped objects are collected and the allocator's cached VRAM is returned, so the next phase
+        has the most free VRAM and is less likely to spill into shared memory."""
         ctx = pipeline.setup_generation_context(
             dit_device=devices.device,
             vae_device=devices.device,
@@ -376,19 +377,19 @@ class Script(scripts.Script):
         ctx = pipeline.encode_all_batches(runner, ctx=ctx, images=frames_tensor, debug=debug, batch_size=1, uniform_batch_size=False, seed=request.seed,
                                           progress_callback=check_interruption,
                                           temporal_overlap=0, resolution=request.resolution, max_resolution=0, input_noise_scale=request.input_noise, color_correction="lab")
-        devices.torch_gc()
+        release_freed_memory()
 
         if not debug_mode: print("[SeedVR2] Phase 2/4: Upscaling...")
         ctx = pipeline.upscale_all_batches(runner, ctx=ctx, debug=debug,
                                            progress_callback=check_interruption,
                                            seed=request.seed, latent_noise_scale=request.latent_noise, cache_model=request.memory_plan.cache_models)
-        devices.torch_gc()
+        release_freed_memory()
 
         if not debug_mode: print(f"[SeedVR2] Phase 3/4: Decoding {'(Tiled)' if request.use_tile_vae else ''}...")
         ctx = pipeline.decode_all_batches(runner, ctx=ctx, debug=debug,
                                           progress_callback=check_interruption,
                                           cache_model=request.memory_plan.cache_models)
-        devices.torch_gc()
+        release_freed_memory()
 
         if not debug_mode: print("[SeedVR2] Phase 4/4: Post-processing...")
         ctx = pipeline.postprocess_all_batches(ctx=ctx, debug=debug,

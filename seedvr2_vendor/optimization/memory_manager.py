@@ -1050,10 +1050,12 @@ def cleanup_dit(runner: Any, debug: Optional['Debug'] = None, cache_model: bool 
         
         # Move model off GPU if needed
         if param_device.type not in ['meta', 'cpu']:
-            # MPS: skip CPU movement before deletion (unified memory, just causes sync)
-            if param_device.type == 'mps' and not cache_model:
+            # Local patch (Forge Neo): skip the CPU copy before deletion on every device, not only MPS.
+            # release_model_memory frees GPU storage in place, so the copy only put the whole model (~8 GB for
+            # 7B fp8) into system RAM right before it was dropped.
+            if not cache_model:
                 if debug:
-                    debug.log("DiT on MPS - skipping CPU movement before deletion", category="cleanup")
+                    debug.log("DiT not cached - skipping CPU movement before deletion", category="cleanup")
             else:
                 offload_target = getattr(runner, '_dit_offload_device', None)
                 if offload_target is None or offload_target == 'none':
@@ -1128,10 +1130,11 @@ def cleanup_vae(runner: Any, debug: Optional['Debug'] = None, cache_model: bool 
         
         # Move model off GPU if needed
         if param_device.type not in ['meta', 'cpu']:
-            # MPS: skip CPU movement before deletion (unified memory, just causes sync)
-            if param_device.type == 'mps' and not cache_model:
+            # Local patch (Forge Neo): skip the CPU copy before deletion on every device, not only MPS
+            # (see cleanup_dit).
+            if not cache_model:
                 if debug:
-                    debug.log("VAE on MPS - skipping CPU movement before deletion", category="cleanup")
+                    debug.log("VAE not cached - skipping CPU movement before deletion", category="cleanup")
             else:
                 offload_target = getattr(runner, '_vae_offload_device', None)
                 if offload_target is None or offload_target == 'none':
