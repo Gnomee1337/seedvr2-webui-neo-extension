@@ -5,8 +5,8 @@
 
 ## Where we stopped
 
-**B04 closed** (repo hygiene) on branch `feature/b04-repo-hygiene`. **Not merged into `main` and not pushed** — waiting
-for the owner's consent. `main` = B05, already pushed. No releases or tags.
+**B04 closed** (repo hygiene) and merged into `main` with the owner's consent; `main` is pushed, users get it on their
+next "Check for updates". No open feature branches. No releases or tags.
 
 What B04 changes for users: the vendored package is `seedvr2_vendor` (was `src`), so the extension no longer clashes
 with another SeedVR2 extension's `src`; the foreign-`src` check is gone. Apache-2.0 `LICENSE` and `NOTICE` added;
@@ -29,8 +29,8 @@ CI: none.
 
 ## Next steps
 
-1. Owner's consent → merge `feature/b04-repo-hygiene` into `main` (`--no-ff`) and push.
-2. B06 — VRAM/RAM lifecycle and BlockSwap for 7B on 8 GB GPUs (also: pipeline import before any work).
+1. B06 — VRAM/RAM lifecycle and BlockSwap for 7B on 8 GB GPUs (also: pipeline import before any work).
+2. B07 — correct results (every image of a batch, infotext, save settings).
 
 Agreed with the owner: REQ-1…REQ-6, simplified Git Flow, ComfyUI files kept as in upstream (Forge Neo only),
 hardware target — 8 GB GPU without bf16, the whole repository under Apache-2.0. The fork is public: `main` is what
@@ -38,4 +38,4 @@ users get, pushes only with consent.
 
 ## Open questions for the owner
 
-1. Merge B04 into `main` and push (users get the rename on their next update)?
+None.
