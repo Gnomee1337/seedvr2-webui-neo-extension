@@ -53,10 +53,12 @@ The result is saved with the `-seedvr2` suffix. **Unload SD Checkpoint** (on by 
 the checkpoint is reloaded on the next generation.
 
 **After run:** *Unload SeedVR2* (default) frees the SeedVR2 models from VRAM and RAM when the upscale ends;
-*Keep in RAM* keeps them for a faster next run at the cost of 3–8 GB of system RAM. After an error or an interrupt
-the models are always unloaded. **Force Reload** reads the model files from disk again.
+*Keep in RAM* keeps them for a faster next run at the cost of system RAM about the size of the two model files
+(3–4 GB for 3B fp8, ~16 GB for 7B fp16). An error or an interrupt during the upscale unloads them in either mode.
+**Force Reload** reads the model files from disk again; it matters only with *Keep in RAM*, since *Unload* reads
+them on every run anyway.
 
-### GPUs with 8–10 GB
+### GPUs with 8–11 GB
 
 - **7B models need BlockSwap.** Without it they spill into shared memory and run many times slower. Set
   **BlockSwap: DiT blocks kept in RAM** to **16** (the script shows this hint when a 7B is selected). Measured with

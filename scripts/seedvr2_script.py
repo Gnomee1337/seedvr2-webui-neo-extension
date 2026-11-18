@@ -26,7 +26,7 @@ if EXTENSION_ROOT not in sys.path:
     sys.path.insert(0, EXTENSION_ROOT)
 
 from seedvr2_neo.loaded_models import LoadedModelTracker
-from seedvr2_neo.memory_plan import (MAX_BLOCKS_TO_SWAP, AfterRun, MemoryPlan, build_memory_plan, is_7b_checkpoint,
+from seedvr2_neo.memory_plan import (CPU_DEVICE, MAX_BLOCKS_TO_SWAP, AfterRun, MemoryPlan, build_memory_plan, is_7b_checkpoint,
                                      low_vram_warning)
 from seedvr2_neo.model_discovery import ModelScan, describe_missing_models, find_selection_error, scan_models
 from seedvr2_neo.model_lifecycle import DIT_CACHE_ID, VAE_CACHE_ID, ModelLifecycle
@@ -145,10 +145,12 @@ class Script(scripts.Script):
         with gr.Row():
             after_run = gr.Radio(label="After run", choices=[option.value for option in AfterRun],
                                  value=AfterRun.UNLOAD.value,
-                                 info="Unload frees VRAM and RAM; Keep in RAM makes the next run start faster")
+                                 info="Unload frees VRAM and RAM; Keep in RAM makes the next run start faster but "
+                                      "holds RAM the size of the model files")
             blocks_to_swap = gr.Slider(label="BlockSwap: DiT blocks kept in RAM", minimum=0,
                                        maximum=MAX_BLOCKS_TO_SWAP, step=1, value=0)
-            swap_io_components = gr.Checkbox(label="BlockSwap: I/O layers too", value=False)
+            swap_io_components = gr.Checkbox(label="BlockSwap: I/O layers too", value=False,
+                                             info="Turns BlockSwap on even with 0 blocks; saves little VRAM")
 
         with gr.Accordion("Advanced Settings (Noise & Tiling)", open=False):
             with gr.Row():
@@ -193,8 +195,8 @@ class Script(scripts.Script):
 
         try:
             pipeline = import_pipeline()
-        except ImportError as e:
-            print(f"❌ [SeedVR2] Cannot import the pipeline: {e}")
+        except Exception as e:  # not only ImportError: the import also probes bf16 on the GPU and may raise (e.g. OOM)
+            print(f"❌ [SeedVR2] Cannot import the pipeline: {type(e).__name__}: {e}")
             return empty_result(p, f"Error: {e}")
 
         memory_plan = build_memory_plan(after_run, blocks_to_swap, swap_io_components)
@@ -325,7 +327,7 @@ class Script(scripts.Script):
             return empty_result(p, f"Runtime Error: {e}")
 
         finally:
-            output_tensor = None
+            output_tensor = None  # drop the last reference to the output before the memory release below
             kept = MODEL_LIFECYCLE.finish_run(model_cache, memory_plan.cache_models, succeeded)
             print("[SeedVR2] Models kept in RAM for the next run." if kept
                   else "[SeedVR2] Models unloaded, memory released.")
@@ -342,7 +344,7 @@ class Script(scripts.Script):
             vae_device=devices.device,
             dit_offload_device=request.memory_plan.dit_offload_device,
             vae_offload_device=request.memory_plan.vae_offload_device,
-            tensor_offload_device="cpu",
+            tensor_offload_device=CPU_DEVICE,
             debug=debug
         )
 

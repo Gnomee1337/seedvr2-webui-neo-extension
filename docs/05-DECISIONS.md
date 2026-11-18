@@ -103,7 +103,8 @@ next generation.
 
 ### SeedVR2 is unloaded after every run by default; "Keep in RAM" is opt-in
 Why: the owner's choice. Forge has no hook to ask an extension for its memory back, so whatever SeedVR2 keeps shrinks
-what SD can load; with a 16 GB RAM system the cached 3–8 GB left almost no free RAM. Keeping models is for repeated
+what SD can load; with a 16 GB RAM system the cached models (3–4 GB for 3B fp8, up to ~16 GB for 7B fp16) left
+almost no free RAM. Keeping models is for repeated
 upscales and must be chosen.
 
 ### Models are dropped after an error or an interrupt, even with "Keep in RAM"
@@ -115,10 +116,11 @@ Why: the vendored cache matches by file name; a same-named file in the other mod
 reuse old weights. Our check lives in `seedvr2_neo/`, the vendored cache stays unpatched.
 
 ### BlockSwap is a manual slider with a note for 7B on small GPUs, not an automatic setting
-Why: the owner's choice. The right block count depends on the GPU, the model and the resolution and is not measured
-yet; a wrong automatic value either wastes speed or still overflows. BlockSwap on also moves the VAE to RAM during the
-DiT step: when VRAM is short, the idle VAE should not hold it. The note's threshold (11 GiB) is the 7B fp8 weights
-(~7.9 GB) plus activations at 1080p.
+Why: the owner's choice. The right block count depends on the GPU, the model, the resolution and even the PyTorch
+allocator (7B fp8 at 1080p on 8 GB: 8 blocks take 21 s with `--cuda-malloc` and 122 s without); a wrong automatic
+value either wastes speed or still overflows. The note recommends 16 blocks, the count measured to fit with both
+allocators (34–42 s). BlockSwap on also moves the VAE to RAM during the DiT step: when VRAM is short, the idle VAE
+should not hold it. The note's threshold (11 GiB) is the 7B fp8 weights (~7.9 GB) plus activations at 1080p.
 
 ### Fixed pipeline settings: batch 1, LAB color correction, `sdpa`, no `torch.compile`
 Why (*reconstructed from code*): the simplest configuration that works without optional packages.

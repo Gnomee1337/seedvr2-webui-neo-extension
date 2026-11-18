@@ -59,11 +59,20 @@ class ModelLifecycle:
         return False
 
     def unload(self, cache: ModelCache) -> bool:
-        """Remove both models from the cache and release their memory. Returns True when anything was cached."""
+        """Remove both models from the cache and release their memory. Returns True when anything was cached.
+
+        A failing removal of one model must not keep the other cached or skip the release; the error still propagates.
+        """
         self._tracker.forget()
-        removed_dit = cache.remove_dit({"node_id": DIT_CACHE_ID})
-        removed_vae = cache.remove_vae({"node_id": VAE_CACHE_ID})
-        if removed_dit or removed_vae:
-            self._release_memory()
-            return True
-        return False
+        removed_dit = removed_vae = False
+        dit_failed = True
+        try:
+            removed_dit = cache.remove_dit({"node_id": DIT_CACHE_ID})
+            dit_failed = False
+        finally:
+            try:
+                removed_vae = cache.remove_vae({"node_id": VAE_CACHE_ID})
+            finally:
+                if dit_failed or removed_dit or removed_vae:
+                    self._release_memory()
+        return removed_dit or removed_vae

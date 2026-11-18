@@ -71,8 +71,10 @@ Live-checked on an 8 GB GPU without bf16, 16 GB RAM, 1080px output, VAE tile 512
   `--cuda-malloc` (0 GB free), 4 blocks spill (297 s). Larger outputs need more blocks. The note recommends 16.
 - 🟡 R4 (S2×L2) **VAE tile 1024 (the default) spills on 8 GB GPUs at 1080px.** Encode peak 6.9 GB, 1.3 GB paged
   (16 s vs 5.7 s with tile 512); decode 2.9 GB paged. README recommends 512; the default is unchanged.
-- 🟡 R4 (S2×L2) **"Keep in RAM" holds 3–8 GB of system RAM until the next run.** Together with Forge's offloaded SD
-  checkpoint a 16 GB system dropped to 0.03 GB free RAM. Default is "Unload SeedVR2"; the option's hint says what it costs.
+- 🟡 R4 (S2×L2) **"Keep in RAM" holds the models in system RAM until the next run** (3–4 GB for 3B fp8, ~16 GB for
+  7B fp16). Together with Forge's offloaded SD checkpoint a 16 GB system dropped to 0.03–0.7 GB free RAM. Default is
+  "Unload SeedVR2"; the option's hint and the README say what it costs. An interrupt before the upscale starts (during
+  the base image) leaves the previous run's kept models in RAM until the next run.
 - 🟡 R4 (S2×L2) **GPUs without bf16 (RTX 20xx / GTX 16xx) run the pipeline in emulated bf16.** The bf16 probe in
   `seedvr2_vendor/optimization/compatibility.py` passes on current PyTorch, so DiT and VAE compute in bf16; results are clean.
   Not measured: how much faster fp16 compute would be on these GPUs. Idea: `06-IDEAS.md`.
@@ -87,7 +89,18 @@ Live-checked on an 8 GB GPU without bf16, 16 GB RAM, 1080px output, VAE tile 512
 - 🟢 R3 (S1×L3) **"Unload SD Checkpoint" (on by default) costs a full checkpoint reload on the next generation** — about
   2 minutes with a large checkpoint. It is the price of freeing VRAM; the checkbox hint says so. Idea for a partial unload: `06-IDEAS.md`.
 - 🟢 R2 (S1×L2) **"Keep in RAM" reloads both models when only one changes.** Changing only the VAE drops the cached DiT
-  too (a 7B reloads from disk). After Forge's "Reload UI" the kept models stay in RAM untracked until the next run drops them.
+  too (a 7B reloads from disk). After Forge's "Reload UI" the kept models stay in RAM untracked until the next run drops
+  them. Switching Keep in RAM → Unload with the same files also reads them from disk once (the vendored cache drops its
+  entries when caching is off).
+- 🟢 R2 (S2×L1) **"Keep in RAM" + an error or interrupt in Phase 2 copies the DiT to RAM just to drop it.** The phase's
+  `finally` caches it (`cache_model=True`), then the run is failed and the models are unloaded: a RAM spike of the DiT's
+  size and a few seconds after Interrupt. Result correct (live). Avoiding it needs a patch of the vendored `finally`.
+- 🟢 R2 (S2×L1) **Not run live:** Keep in RAM with BlockSwap on; Keep in RAM with the block count changed between runs
+  (upstream's `_handle_blockswap_change`); interrupt in Unload mode.
+- 🟢 R1 (S1×L1) **Edge cases of the B06 helpers** (stress tests in `tests/seedvr2_neo/*_stress.py`): a same-size file
+  replaced within one mtime step (100 ns NTFS, 2 s FAT32) is trusted; a symlinked model path counts as another file
+  (one extra reload); `"8.0"` as a string from the API means BlockSwap off; an error from the memory release in the
+  script's `finally` replaces the run's result with a raw exception.
 - 🟢 R2 (S2×L1) **Calls with the old argument list** (API payloads saved before the new controls) get the defaults
   for "After run" and BlockSwap: unload, BlockSwap off.
 
@@ -110,7 +123,10 @@ Live-checked on an 8 GB GPU without bf16, 16 GB RAM, 1080px output, VAE tile 512
   Close: set `ctx['interrupt_fn']` to a Forge check and update `shared.state.job*` from `progress_callback`. (B08)
 
 ## 5. Code hygiene
-- 🟢 R3 (S1×L3) **No CI; `scripts/seedvr2_script.py` has no tests** (needs Forge stubs). (B09)
+- 🟢 R3 (S1×L3) **No CI; `scripts/seedvr2_script.py` has no tests** (needs Forge stubs). Also untested: the
+  pipeline import before the base image (checked by code order and a stubbed import check only), and our calls against
+  the real `GlobalModelCache` / `validate_blockswap_config` (tests use stand-ins), so an upstream sync can break them
+  with all tests green. (B09)
 - 🟢 R3 (S1×L3) **Leftover `src/` folder after an update.** Forge's update (`reset --hard`) removes the tracked files but
   keeps untracked `src/**/__pycache__`. Harmless: nothing imports `src`, and a folder without `__init__.py` loses to
   another extension's real `src` package. Users may delete it by hand.

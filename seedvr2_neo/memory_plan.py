@@ -26,6 +26,7 @@ LOW_VRAM_7B_THRESHOLD_GIB = 11.0
 RECOMMENDED_7B_BLOCKS_TO_SWAP = 16
 
 _BYTES_PER_GIB = 1024 ** 3
+_FALSE_STRINGS = frozenset({"", "false", "0", "off", "no", "none"})
 
 
 class AfterRun(str, Enum):
@@ -62,7 +63,7 @@ def build_memory_plan(after_run: str, blocks_to_swap: Any, swap_io_components: A
     VRAM is short, so the VAE also waits in RAM while the DiT runs instead of holding VRAM it does not use then.
     """
     blocks = clamp_blocks_to_swap(blocks_to_swap)
-    swap_io = bool(swap_io_components)
+    swap_io = parse_flag(swap_io_components)
     offload_device = CPU_DEVICE if blocks > 0 or swap_io else None
     return MemoryPlan(
         cache_models=_parse_after_run(after_run) is AfterRun.KEEP_IN_RAM,
@@ -71,6 +72,13 @@ def build_memory_plan(after_run: str, blocks_to_swap: Any, swap_io_components: A
         blocks_to_swap=blocks,
         swap_io_components=swap_io,
     )
+
+
+def parse_flag(value: Any) -> bool:
+    """A checkbox value; API callers may send strings, where "False" / "0" / "off" must not mean True."""
+    if isinstance(value, str):
+        return value.strip().lower() not in _FALSE_STRINGS
+    return bool(value)
 
 
 def clamp_blocks_to_swap(value: Any) -> int:
@@ -90,10 +98,10 @@ def is_7b_checkpoint(dit_model: str, checkpoint_path: str) -> bool:
     """
     try:
         from seedvr2_vendor.utils.dit_size import DitSize, choose_dit_size
-    except ImportError as e:
-        print(f"[SeedVR2] Cannot check the DiT size: {e}")
+        return choose_dit_size(dit_model, checkpoint_path).size is DitSize.B7
+    except Exception as e:  # runs inside Script.ui(): any failure here would drop the whole script from Forge's UI
+        print(f"[SeedVR2] Cannot check the DiT size: {type(e).__name__}: {e}")
         return False
-    return choose_dit_size(dit_model, checkpoint_path).size is DitSize.B7
 
 
 def low_vram_warning(is_7b: bool, total_vram_bytes: Optional[int]) -> Optional[str]:
@@ -107,7 +115,7 @@ def low_vram_warning(is_7b: bool, total_vram_bytes: Optional[int]) -> Optional[s
     total_gib = total_vram_bytes / _BYTES_PER_GIB
     if total_gib >= LOW_VRAM_7B_THRESHOLD_GIB:
         return None
-    return (f"⚠️ 7B model on a {total_gib:.1f} GB GPU: without BlockSwap it spills into shared memory and runs many times "
+    return (f"⚠️ 7B model on this {total_gib:.1f} GB GPU: without BlockSwap it spills into shared memory and runs many times "
             f"slower. Turn on BlockSwap below: start with {RECOMMENDED_7B_BLOCKS_TO_SWAP} blocks (more blocks = less VRAM, "
             f"slower), or use a 3B model.")
 

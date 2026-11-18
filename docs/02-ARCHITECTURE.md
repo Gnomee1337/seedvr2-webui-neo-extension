@@ -13,7 +13,7 @@ The source of truth is the code; this document is reconciled with it on every `/
 | ML | PyTorch, torchvision, einops, diffusers, OmegaConf, `rotary-embedding-torch`, `gguf` (GGUF models only; Forge Neo's bundled copy), OpenCV (alpha upscaling) |
 | Database | none |
 | Packages | `install.py` (run by Forge at launch); `requirements.txt` is informational — Forge does not read it |
-| Runtime | inside Forge Neo, single CUDA GPU (`cuda:0` is hard-coded) |
+| Runtime | inside Forge Neo, on Forge's device (`modules.devices.device`); the vendored bf16 probe still uses `cuda:0` |
 | Tests | `pytest` outside Forge, no GPU (`requirements-dev.txt`: `pytest`, `gguf`); config in `tests/pytest.ini` |
 
 ## Folders
@@ -111,7 +111,7 @@ No database. Files:
 | Model weights | `<models_path>/SeedVR2/`, else `extensions/<ext>/models/SeedVR2/` (any letter case) | the user | `model_discovery.py` (listing), `dit_size.py` (header only), `model_loader.py` |
 | Text embeddings | `pos_emb.pt`, `neg_emb.pt` in the root | committed | `load_text_embeddings` (`torch.load(weights_only=True)`) |
 | Upscaled images | `p.outpath_samples` (the tab's output folder) | `seedvr2_script.py` via `images.save_image` | the user |
-| In-memory caches | `GlobalModelCache` (models, on GPU), `Script.runner_cache` (generation context) | pipeline / script | pipeline / script |
+| In-memory caches | `GlobalModelCache`: DiT/VAE in system RAM, only with "Keep in RAM" (emptied by `seedvr2_neo/model_lifecycle.py` after an "Unload" run, an error, Force Reload or other files); `MODEL_LIFECYCLE`: which files they came from | the pipeline; the script | the pipeline (cache hit); `ModelLifecycle` |
 
 ## Kill-switch flags
 None: the extension does not act on other people's data. Behaviour is controlled per run from the UI.
@@ -126,5 +126,3 @@ Code that is never called in Forge. Only the owner deletes it.
 | `__init__.py` (root) | Forge never imports the extension root as a package; it imports `comfy_api` which does not exist in Forge | keep as in upstream except the package rename — upstream diffing (`05-DECISIONS.md`) |
 | `seedvr2_vendor/interfaces/` | ComfyUI nodes; import `comfy_api` / `comfy_execution` | keep untouched — upstream diffing (`05-DECISIONS.md`) |
 | `seedvr2_vendor/utils/downloads.py`, `model_registry.py` | nothing in Forge calls the download code (`model_registry` is still used for model classes) | keep — needed if auto-download is taken (`06-IDEAS.md`) |
-| `finally` block keys `images`, `encoded_latents`, `upscaled_latents` in `seedvr2_script.py` | these keys never exist in `ctx`; only `final_video` is real | fix in B06 |
-| `argparse.Namespace` fields in `run()` | most fields are built but the calls pass literals instead | simplify in B07 |

@@ -22,10 +22,10 @@ class ModelFileIdentity:
 
 def read_model_file_identity(path: str) -> Optional[ModelFileIdentity]:
     """Identity of the file at `path`, or None when it cannot be read (then the cache is never trusted)."""
-    absolute_path = os.path.abspath(path)
     try:
+        absolute_path = os.path.abspath(path)
         stat = os.stat(absolute_path)
-    except OSError:
+    except (OSError, ValueError):  # ValueError: a NUL in the path
         return None
     return ModelFileIdentity(path=os.path.normcase(absolute_path), size=stat.st_size, mtime_ns=stat.st_mtime_ns)
 

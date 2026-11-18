@@ -32,7 +32,8 @@ Changes we made to vendored files. Re-apply after every upstream sync. Each code
   The GPU memory is freed by dropping the model (`runner.dit = None` / `runner.vae = None`) plus the caller's
   `gc.collect()` and CUDA empty-cache; `release_model_memory` does **not** free it (`param.data.set_()` acts on a
   detached view, the parameter keeps its storage), so any other reference to the model keeps its VRAM held.
-  Not unit-tested (tests run without torch); to be checked in the live run.
+  Not unit-tested (tests run without torch); checked live on an 8 GB GPU: "skipping CPU movement" logged, no RAM
+  growth at the end of Phase 2, the DiT's VRAM returned before Phase 3.
 - `__init__.py` (root, ComfyUI-only): imports `.seedvr2_vendor` instead of `.src`.
 - `requirements.txt` is not synced from upstream: ours lists only what the code imports (upstream's adds `peft`, `matplotlib`).
 
@@ -40,7 +41,9 @@ Changes we made to vendored files. Re-apply after every upstream sync. Each code
 - **Caching requires an offload device.** Upstream's own loaders refuse `cache_model=True` without an offload device
   ("Model caching (cache_model=True) requires offload_device to be set", `seedvr2_vendor/interfaces/dit_model_loader.py`,
   `vae_model_loader.py`); the CLI defaults the offload to `cpu` when caching (`inference_cli.py`, `_parse_offload_device`).
-  Our script bypasses the loaders and caches with no offload — models stay in VRAM. Source: upstream source.
+  Our script bypasses the loaders and, without BlockSwap, caches with no offload device: `cleanup_dit` / `cleanup_vae`
+  then fall back to the CPU, so cached models wait in system RAM (live: DiT CPU→GPU 11.8 s on the next run), while the
+  VAE stays in VRAM during the DiT step. Source: upstream source, `seedvr2_vendor/optimization/memory_manager.py`.
 - **BlockSwap and `swap_io_components` require a DiT offload device.** Source: `inference_cli.py` help, `dit_model_loader.py`.
 - **Interrupt hook:** `setup_generation_context` sets `ctx['interrupt_fn']` only when ComfyUI is importable; outside ComfyUI it is `None`
   and the phases check interruption only through `progress_callback`. Setting `ctx['interrupt_fn']` to a Forge check gives

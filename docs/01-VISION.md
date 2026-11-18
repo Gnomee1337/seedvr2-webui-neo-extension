@@ -32,8 +32,8 @@ Confirmed by the owner. The project is delivered when all requirements are met:
 |---|---|---|
 | REQ-1 | **Clean install** — on a fresh Forge Neo the extension installs from URL, and both a `.safetensors` and a `.gguf` model upscale without manual `pip` | ✅ ¹ |
 | REQ-2 | **Correct results for every image** — batch size / batch count > 1 in txt2img upscales every image (not the grid); grayscale/RGBA inputs work; the infotext of the result contains the generation parameters | ⬜ |
-| REQ-3 | **VRAM is given back** — after an upscale the next SD generation on an 8 GB GPU runs without OOM; "Force Reload" really reloads the models | ⬜ |
-| REQ-4 | **Fits 8 GB GPUs, including ones without bf16** (RTX 20xx / GTX 16xx class) — a 3B GGUF model upscales a 1024px image 2× without OOM and without visible artifacts; if 7B cannot work there, the UI says so instead of failing | ⬜ |
+| REQ-3 | **VRAM is given back** — after an upscale the next SD generation on an 8 GB GPU runs without OOM; "Force Reload" really reloads the models | ✅ ² |
+| REQ-4 | **Fits 8 GB GPUs, including ones without bf16** (RTX 20xx / GTX 16xx class) — a 3B GGUF model upscales a 1024px image 2× without OOM and without visible artifacts; if 7B cannot work there, the UI says so instead of failing | ✅ ³ |
 | REQ-5 | **English docs and correct instructions** — README model paths match the code; LICENSE and upstream attribution present | ✅ |
 | REQ-6 | **Automated tests in CI** — the script's logic is covered by tests that run on every push | ⬜ |
 
@@ -42,4 +42,9 @@ Statuses: ✅ done · 🔄 partial / awaiting confirmation · ⬜ not started.
 ¹ Accepted by the owner on a dependency check, not a fresh install: every runtime package comes from Forge Neo's pinned
 `requirements.txt`, its bundled `modules_forge/packages/gguf`, or our `install.py` (`rotary-embedding-torch`), and
 `.safetensors` + `.gguf` upscale on a Forge Neo with those pinned versions. Not run: `install.py` on a fresh install.
+² Live on an 8 GB GPU: after SeedVR2 with "Unload" the GPU is back to ~0.6 GB used and the next SD generation reloads
+the checkpoint and runs; Force Reload reads both models from disk.
+³ Live on an 8 GB GPU without bf16 at 1080px output: 3B fp8 and 3B GGUF give clean images; 7B shows a BlockSwap note
+and runs in 35–42 s with 16 blocks. A 1024px input upscaled 2× to 2048px with 3B GGUF Q6_K (tile 512): clean image,
+no OOM, 212 s (VAE decode 156 s with `--cuda-malloc`).
 Completion percentage and blocks — `docs/03-ROADMAP.md`.
