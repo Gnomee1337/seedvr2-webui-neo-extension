@@ -58,18 +58,19 @@ Every risk and every bug found gets a rating **R = S × L** and an icon based on
   (`external-apis/forge-neo.md`); if Neo drops or moves it, `.gguf` models stop loading. Close: a test that imports it. (B09)
 
 ## 3. VRAM and model lifecycle
-Live-checked on an 8 GB GPU without bf16, 16 GB RAM, 1080px output: 3B GGUF Q6_K — DiT step 7 s; 3B fp8 — 10 s;
-7B fp8 — 780 s. All three gave clean images. After the run the GPU drops back to about 1 GB used.
+Live-checked on an 8 GB GPU without bf16, 16 GB RAM, 1080px output, VAE tile 512: 3B GGUF Q6_K — DiT step 7 s;
+3B fp8 — 5–7 s; 7B fp8 with BlockSwap 16 — 34–42 s (780 s without BlockSwap). All gave clean images; after a run with
+"Unload" the GPU drops back to about 0.6 GB used. Between phases the reserved VRAM goes back to ~0.5 GB.
 
-- 🟠 R9 (S3×L3) **7B on 8 GB: BlockSwap is in the UI, its speed-up is not measured yet.** Without it 7B fp8 weights
-  (7.9 GB) spill into shared memory and the DiT step is ~80× slower than 3B. The UI now has BlockSwap controls and a
-  note for 7B below 11 GiB; the block count that works on 8 GB is to be found in the live check. (B06)
-- 🟡 R6 (S2×L3) **BlockSwap with a GGUF DiT is not verified.** The quantized layers (`gguf_ops.py`) and block swapping
-  were not run together. Check: live run with a GGUF DiT and BlockSwap on. (B06)
-- 🟡 R6 (S2×L3) **Reserved VRAM grows between phases and spills into shared memory — fix awaiting the live check.**
-  PyTorch's allocator keeps freed blocks reserved (seen: 4.7 GB after VAE encode with 0.5 GB in use, 8.8–9 GB at the end,
-  0.8–2.9 GB paged to system RAM; VAE decode 38 s in one run, 117 s in the next). The script now returns the cache
-  after encode, upscale and decode (`devices.torch_gc()`); whether that stops the paging is to be seen live. (B06)
+- 🟡 R6 (S2×L3) **With `--cuda-malloc` (cudaMallocAsync) VAE decoding spills into shared memory.** At 1080px with tile
+  512 the decode reserves 8.7 GB for a 5.2 GB peak, pages 0.7–2.9 GB and takes 25–137 s; without the flag 6.7 GB
+  reserved, no spill, 12.4 s. The flag is opt-in in Forge but common on 8 GB setups; it makes the 7B DiT step faster
+  with few BlockSwap blocks (8 blocks: 21 s vs 122 s). README gives the trade-off. Close: release the cache inside the
+  VAE decode between tiles, or measure `expandable_segments`.
+- 🟡 R4 (S2×L2) **7B with too few BlockSwap blocks falls off a cliff.** 7B fp8 on 8 GB: 8 blocks fit only with
+  `--cuda-malloc` (0 GB free), 4 blocks spill (297 s). Larger outputs need more blocks. The note recommends 16.
+- 🟡 R4 (S2×L2) **VAE tile 1024 (the default) spills on 8 GB GPUs at 1080px.** Encode peak 6.9 GB, 1.3 GB paged
+  (16 s vs 5.7 s with tile 512); decode 2.9 GB paged. README recommends 512; the default is unchanged.
 - 🟡 R4 (S2×L2) **"Keep in RAM" holds 3–8 GB of system RAM until the next run.** Together with Forge's offloaded SD
   checkpoint a 16 GB system dropped to 0.03 GB free RAM. Default is "Unload SeedVR2"; the option's hint says what it costs.
 - 🟡 R4 (S2×L2) **GPUs without bf16 (RTX 20xx / GTX 16xx) run the pipeline in emulated bf16.** The bf16 probe in
@@ -81,8 +82,8 @@ Live-checked on an 8 GB GPU without bf16, 16 GB RAM, 1080px output: 3B GGUF Q6_K
   the other model's note until the selection changes (not checked in Forge). Close: threshold from the DiT file size.
 - 🟢 R3 (S3×L1) **An unloaded model's VRAM is freed only when nothing references it.** `release_model_memory` does not
   free CUDA storage (`external-apis/seedvr2-upstream.md`, local patches); the memory returns when the runner drops the
-  model and `gc.collect()` + empty-cache run. A stray reference would keep the VRAM held with no warning. Check: GPU
-  memory after a run in the live check.
+  model and `gc.collect()` + empty-cache run (live: the DiT's 3.2 GB stays allocated right after Phase 2 and is gone
+  before Phase 3). A stray reference would keep the VRAM held with no warning.
 - 🟢 R3 (S1×L3) **"Unload SD Checkpoint" (on by default) costs a full checkpoint reload on the next generation** — about
   2 minutes with a large checkpoint. It is the price of freeing VRAM; the checkbox hint says so. Idea for a partial unload: `06-IDEAS.md`.
 - 🟢 R2 (S1×L2) **"Keep in RAM" reloads both models when only one changes.** Changing only the VAE drops the cached DiT
@@ -122,9 +123,8 @@ Live-checked on an 8 GB GPU without bf16, 16 GB RAM, 1080px output: 3B GGUF Q6_K
   that uses the same names; no check exists. Unlikely with these names.
 
 ## Top risks
-1. 🟠 R9 7B on 8 GB: BlockSwap speed-up not measured — section 3.
-2. 🟠 R8 Only the first image (or the grid) is upscaled — section 4.
-3. 🟡 R6 BlockSwap with GGUF not verified — section 3.
-4. 🟡 R6 Reserved VRAM spill, fix awaiting live check — section 3.
-5. 🟡 R6 Result infotext lost — section 4.
-6. 🟡 R4 Corrupt GGUF header can hang the WebUI — section 1.
+1. 🟠 R8 Only the first image (or the grid) is upscaled — section 4.
+2. 🟡 R6 VAE decode spills with `--cuda-malloc` — section 3.
+3. 🟡 R6 Result infotext lost — section 4.
+4. 🟡 R4 Corrupt GGUF header can hang the WebUI — section 1.
+5. 🟡 R4 7B with too few BlockSwap blocks; VAE tile 1024 spills on 8 GB — section 3.

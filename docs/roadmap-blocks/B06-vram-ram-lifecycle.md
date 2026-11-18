@@ -101,7 +101,7 @@ Runs 1–2 by the owner through the UI, the rest through Forge's API (img2img wi
 - 2 ✅ Keep in RAM: second run "Reusing cached runner / DiT / VAE", no disk reads; DiT CPU→GPU 11.8 s vs 28 s from disk.
 - 3 ✅ Force Reload: "Cached models dropped…", both models read from disk, the old copies freed (process RAM 1.2 GB).
 - 4 ✅ Interrupt in Phase 2 (Keep in RAM): "Interrupted", then "Models unloaded"; next run clean.
-- 5 ⬜ 7B warning in the UI — owner to check.
+- 5 ✅ 7B warning in the UI (owner): "⚠️ 7B model on a 8.0 GB GPU … start with 16 blocks …".
 - 6 ✅ 7B fp8, DiT step (was 780 s): BlockSwap 16 → 34.5 s, 8 → 21 s (0 GB free), 4 → 297 s (spill), 8 + I/O → 22.8 s;
   image clean. Without `--cuda-malloc`: 16 → 42 s, 8 → 122 s. Recommended: 16 (in the warning).
 - 7 ✅ 3B GGUF Q6_K + BlockSwap 16: works, image clean (DiT 17 s; without BlockSwap 7 s — 3B needs none).
