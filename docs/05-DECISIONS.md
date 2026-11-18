@@ -24,9 +24,9 @@ Docs, comments, docstrings and commit messages — English; the owner is address
 Why: from a file's path you immediately see where its tests are, and vice versa.
 
 ### `pytest.ini` lives in `tests/`, tests run as `python -m pytest tests`
-Why: the root holds ComfyUI's package `__init__.py` (kept unchanged); with the ini in the root pytest imports it and fails.
+Why: the root holds ComfyUI's package `__init__.py` (ComfyUI-only); with the ini in the root pytest imports it and fails.
 A root `conftest.py` hook cannot stop that (hooks for the root come from its parent), and `--rootdir` in `addopts` is ignored.
-Default import mode: importlib mode would register `tests/src` as the `src` package and hide the real one.
+Default import mode: importlib mode would register `tests/seedvr2_vendor` as the `seedvr2_vendor` package and hide the real one.
 
 ### Branches: simplified Git Flow
 Why: one developer, no versioned releases yet. `main` + short `feature/*` / `fix/*` branches merged back with green CI.
@@ -40,19 +40,36 @@ commits; hardware targets are described as a class ("8 GB GPU without bf16"), no
 
 ## Vendored pipeline
 
-### SeedVR2 code is vendored in `src/`, not installed as a package
+### SeedVR2 code is vendored in `seedvr2_vendor/`, not installed as a package
 Why (*reconstructed from code*): the upstream ComfyUI port is not a pip package and imports ComfyUI only optionally;
 copying it makes the extension self-contained. Pitfall: upstream fixes do not arrive by themselves — local patches are
 listed in `docs/external-apis/seedvr2-upstream.md` so a sync does not lose them.
 
-### Fix in `scripts/` first, patch `src/` only when unavoidable
+### The vendored package is named `seedvr2_vendor`, not upstream's `src`
+Why: Forge keeps every extension folder on `sys.path`, and other SeedVR2 ports also ship a top-level `src`; whichever
+loads first is reused by both, so ours ran without its patches. Imports inside the package are relative, so the rename
+touches only the code that imports it from outside. A sync copies upstream `src/` into `seedvr2_vendor/`. The runtime check
+for a foreign `src` was removed with the rename.
+
+### Fix in `scripts/` first, patch `seedvr2_vendor/` only when unavoidable
 Why: every change to vendored code makes the next upstream sync harder. A small marked patch is preferred over
-monkey-patching `src/` from the script: a patch conflict on sync is visible, a broken monkey-patch fails silently.
+monkey-patching `seedvr2_vendor/` from the script: a patch conflict on sync is visible, a broken monkey-patch fails silently.
 Our own helpers that need no Forge imports live in `seedvr2_neo/` (a `.py` in `scripts/` would be loaded by Forge as a script).
 
 ### Only Forge Neo is supported; ComfyUI files stay but are not maintained
-Why: ComfyUI already has its own SeedVR2 node pack (the upstream). The root `__init__.py` and `src/interfaces/` are ComfyUI entry
-points, never loaded by Forge; they are kept untouched so `diff -r` against upstream stays clean. Not fixed, not tested here.
+Why: ComfyUI already has its own SeedVR2 node pack (the upstream). The root `__init__.py` and `seedvr2_vendor/interfaces/` are ComfyUI entry
+points, never loaded by Forge; they are kept as close to upstream as possible so `diff -r` stays clean (the root `__init__.py`
+only follows the package rename). Not fixed, not tested here.
+
+### The whole repository is Apache-2.0; `NOTICE` credits the sources and lists our changes
+Why: the owner's choice — the same license as the vendored code, so the repository has one license. Apache-2.0 §4(b)
+change notices: a `Local patch (Forge Neo)` comment at each change plus the list in `external-apis/seedvr2-upstream.md`.
+No per-file license headers in our own files: that is ASF guidance, not a §4 condition, and it needs a named copyright holder.
+Existing ByteDance / HuggingFace headers in vendored files are kept as they are (§4(c)).
+
+### `requirements.txt` is our own informational list, not upstream's
+Why: Forge Neo does not read it (`install.py` installs what is missing), so it only informs a reader; upstream's copy listed
+packages the code never imports (`peft`, `matplotlib`).
 
 ## Forge integration
 
@@ -60,10 +77,6 @@ points, never loaded by Forge; they are kept untouched so `diff -r` against upst
 Why: the owner's choice — users keep all models in one place, and it survives reinstalling the extension. The folder comes
 from `shared.models_path` (follows `--model-ref` / `--data-dir`), never from the working directory. The first candidate
 holding both a DiT and a VAE wins, so a stray or partial set in one place does not hide a full set in the other.
-
-### Our `src` must be the one Python loaded; otherwise the run stops with a one-line error
-Why: other SeedVR2 ports also ship a top-level `src`; whichever is imported first is reused, and theirs lacks our local
-patches. Renaming the package is the real fix (B04); until then `run()` checks `src.__file__` before any work.
 
 ### 3B or 7B is read from the checkpoint header, not from the file name
 Why: users rename files; a 7B built with the 3B config fails with a shape error. Block count (32 / 36) in the header is

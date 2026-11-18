@@ -20,7 +20,7 @@ generate and upscale an image in one click without switching to ComfyUI.
 ## Out of scope
 - **Video upscaling** — SeedVR2 supports it, but Forge Neo is an image UI; the pipeline runs with batch size 1 and no temporal overlap.
 - **Multi-GPU** — Forge runs on one device.
-- **ComfyUI support** — ComfyUI has its own SeedVR2 node pack (the upstream). `src/interfaces/` and the root `__init__.py`
+- **ComfyUI support** — ComfyUI has its own SeedVR2 node pack (the upstream). `seedvr2_vendor/interfaces/` and the root `__init__.py`
   (ComfyUI entry points) are kept untouched only to make diffing with upstream easy; they are not maintained or tested here.
 - **Training / fine-tuning SeedVR2.**
 - **Automatic model download** — under discussion, see `06-IDEAS.md`.

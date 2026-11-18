@@ -13,13 +13,13 @@ see `external-apis/seedvr2-upstream.md`, "Related project");
 registering an `Upscaler` for Hires. fix / SD upscale (weight 4, the upscaler API passes tiles and a scale, not a target size).
 Do after: B06, B07. Questions for the owner: which entry point matters more to you?
 
-## Sync `src/` with the latest upstream
-`src/` is ComfyUI-SeedVR2_VideoUpscaler v2.5.24. Options: one-off sync with a diff review (weight 3);
-keep `src/` as a git subtree with a patch list (weight 4, recommended if syncing often).
+## Sync `seedvr2_vendor/` with the latest upstream
+`seedvr2_vendor/` is ComfyUI-SeedVR2_VideoUpscaler v2.5.24. Options: one-off sync with a diff review (weight 3);
+keep `seedvr2_vendor/` as a git subtree with a patch list (weight 4, recommended if syncing often).
 Do after: B09 (tests catch regressions). Questions for the owner: how often do you want to follow upstream?
 
 ## Automatic model download
-`src/utils/downloads.py` and `model_registry.py` already download from Hugging Face with SHA-256 checks.
+`seedvr2_vendor/utils/downloads.py` and `model_registry.py` already download from Hugging Face with SHA-256 checks.
 Options: a "Download" button next to the DiT dropdown (weight 2, recommended); download on first run (weight 1, surprises users with
 multi-GB downloads). Questions for the owner: is network access from the extension acceptable?
 
@@ -36,7 +36,7 @@ feather blending (as `tiling.py` in the related project) allows 4K+ outputs on 1
 Now only "shortest edge" in pixels. Presets relative to the input size are easier for users (weight 1). Part of B08 if taken.
 
 ## Optional attention backends
-SageAttention / FlashAttention are supported in `src/` but fixed to `sdpa`. Expose them in "Advanced" when installed (weight 1). Part of B08 if taken.
+SageAttention / FlashAttention are supported in `seedvr2_vendor/` but fixed to `sdpa`. Expose them in "Advanced" when installed (weight 1). Part of B08 if taken.
 
 ## Settings in Forge's Settings tab
 Model folder, default unload behaviour and default tile size as Forge options (`shared.opts`) instead of per-run controls (weight 2).

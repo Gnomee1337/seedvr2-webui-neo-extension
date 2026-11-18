@@ -25,9 +25,6 @@ a VAE but `extensions/<this extension>/models/SeedVR2/` does, the extension fold
 first: if you keep full sets in both places, the WebUI folder is now the one used. The folder in use is printed in the
 console on every run; when no models are found, the script panel shows the exact path to put them in.
 
-Do not install another SeedVR2 extension at the same time: both ship a package named `src`, and if the other one is
-loaded first the run stops with a message naming that extension.
-
 You need:
 
 - a VAE: `ema_vae_fp16.safetensors` (any file with `vae` in its name is listed as a VAE);
@@ -68,5 +65,10 @@ The entry point for Claude Code is [`CLAUDE.md`](CLAUDE.md).
 ## Credits
 
 - [SeedVR / SeedVR2](https://github.com/ByteDance-Seed/SeedVR) — ByteDance Seed.
-- [ComfyUI-SeedVR2_VideoUpscaler](https://github.com/numz/ComfyUI-SeedVR2_VideoUpscaler) — the pipeline code in `src/`.
+- [ComfyUI-SeedVR2_VideoUpscaler](https://github.com/numz/ComfyUI-SeedVR2_VideoUpscaler) — the pipeline code in `seedvr2_vendor/` (upstream folder `src/`).
+- [ComfyUI-GGUF](https://github.com/city96/ComfyUI-GGUF) — the GGUF dequantization code.
 - Original Forge extension — akoyaki ayagi.
+
+## License
+
+Apache License 2.0 — see [`LICENSE`](LICENSE). Attribution and the list of changes to the vendored code — [`NOTICE`](NOTICE).

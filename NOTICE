@@ -1,0 +1,20 @@
+seedvr2-webui-neo-extension
+SeedVR2 upscaling for Stable Diffusion WebUI Forge Neo.
+Licensed under the Apache License, Version 2.0 (see LICENSE).
+
+This product includes software from these projects, all licensed under the Apache License, Version 2.0:
+
+- ComfyUI-SeedVR2_VideoUpscaler (https://github.com/numz/ComfyUI-SeedVR2_VideoUpscaler), commit 4490bd1:
+  the pipeline code in seedvr2_vendor/ (upstream folder name: src/), the root __init__.py, configs_3b/, configs_7b/,
+  pos_emb.pt and neg_emb.pt.
+- SeedVR / SeedVR2 (https://github.com/ByteDance-Seed/SeedVR), Copyright (c) 2025 Bytedance Ltd. and/or its affiliates:
+  the model code that the files above are based on.
+- ComfyUI-GGUF (https://github.com/city96/ComfyUI-GGUF): seedvr2_vendor/optimization/gguf_dequant.py is adapted from it.
+
+Changes to the files above made in this project:
+- the src/ folder is renamed to seedvr2_vendor/, so it cannot clash with another extension's package named src;
+- the files changed in this project carry a "Local patch (Forge Neo)" comment at each change;
+- requirements.txt lists only the packages the code uses.
+The full list is in docs/external-apis/seedvr2-upstream.md ("Local patches").
+
+The Forge extension is based on the original SeedVR2 extension for Forge by akoyaki ayagi.

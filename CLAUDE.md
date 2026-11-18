@@ -23,7 +23,7 @@ Then wait for a command.
 
 - **Structure:** `scripts/seedvr2_script.py` — the only Forge entry point (the Script class, UI and the
   txt2img/img2img flow). `seedvr2_neo/` — our helpers without Forge imports (model discovery).
-  `tests/` — pytest (`python -m pytest tests`). `src/` — the vendored SeedVR2 pipeline (port of ComfyUI-SeedVR2_VideoUpscaler v2.5.24).
+  `tests/` — pytest (`python -m pytest tests`). `seedvr2_vendor/` — the vendored SeedVR2 pipeline (port of ComfyUI-SeedVR2_VideoUpscaler v2.5.24).
   `configs_3b/`, `configs_7b/` — model configs; `pos_emb.pt`, `neg_emb.pt` — precomputed text embeddings;
   `install.py` — dependencies installed by Forge at launch. Code paths in the docs are relative to the repository root.
 
@@ -32,7 +32,7 @@ Then wait for a command.
   A new verified fact — add it there. The Forge Neo source is not in this repository: check facts against
   the `neo` branch of `Haoming02/sd-webui-forge-classic`.
 
-- **`src/` is vendored code.** Change it only when the fix cannot live in `scripts/`; every change to `src/` is
+- **`seedvr2_vendor/` is vendored code.** Change it only when the fix cannot live in `scripts/`; every change to `seedvr2_vendor/` is
   listed in `docs/external-apis/seedvr2-upstream.md` ("Local patches"), otherwise it is lost on the next upstream sync.
 
 - **Dangerous modules:** none act on other people's data. What hurts users: VRAM left occupied after a run,

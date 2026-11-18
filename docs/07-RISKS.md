@@ -36,14 +36,14 @@ Every risk and every bug found gets a rating **R = S × L** and an icon based on
 ## 1. Installation and model discovery
 - 🟡 R4 (S4×L1) **A corrupt GGUF array length makes the header read grow without limit.** `gguf.GGUFReader` (Neo's
   bundled `gguf`, `gguf_reader.py`, array loop) keeps reading past the end of the file for the declared length: a 61-byte
-  file declaring 10^6 items took ~650 MB and 23 s; a value near 2^63 hangs the WebUI. Both `src/utils/dit_size.py` and
-  the loader (`src/core/model_loader.py`) use it. Truncated downloads do not trigger it (the header stays intact).
+  file declaring 10^6 items took ~650 MB and 23 s; a value near 2^63 hangs the WebUI. Both `seedvr2_vendor/utils/dit_size.py` and
+  the loader (`seedvr2_vendor/core/model_loader.py`) use it. Truncated downloads do not trigger it (the header stays intact).
   Repro: `test_gguf_with_absurd_array_length_does_not_grow_memory` (strict xfail). Close: bounded own GGUF header parser.
 - 🟢 R2 (S2×L1) **Cached models are matched by file name only.** The folder is re-chosen on every run; a same-named file
   in the other folder, or a file replaced in place, keeps the old weights and config. Force Reload does not clear it. (B06)
 - 🟢 R2 (S2×L1) **A VAE without `vae` in its name is listed as a DiT**; the note then says no VAE was found. Rename the file.
 - 🟢 R2 (S2×L1) **`find_model_file` falls back to the working-directory scan if the chosen file vanished** between the
-  scan and the load (`src/utils/constants.py`), and raises `NotADirectoryError` if `./models/SEEDVR2` there is a file.
+  scan and the load (`seedvr2_vendor/utils/constants.py`), and raises `NotADirectoryError` if `./models/SEEDVR2` there is a file.
   Repro: `test_cwd_models_entry_that_is_a_file_does_not_raise` (strict xfail).
 - 🟢 R2 (S1×L2) **The extension-folder fallback is checked by tests only**, not in a live Forge run.
 - 🟢 R2 (S1×L2) **A skipped folder is not mentioned.** With a full set in the extension folder, a new DiT put into
@@ -56,14 +56,13 @@ Every risk and every bug found gets a rating **R = S × L** and an icon based on
 ## 2. Dependencies
 - 🟢 R2 (S1×L2) **`gguf` comes from Forge Neo, not from `install.py`.** `import gguf` resolves to Neo's bundled copy
   (`external-apis/forge-neo.md`); if Neo drops or moves it, `.gguf` models stop loading. Close: a test that imports it. (B09)
-- 🟢 R2 (S1×L2) **`requirements.txt` lists unused packages** (`peft`, `matplotlib`) and is not read by Forge at all. (B04)
 
 ## 3. VRAM and model lifecycle
 Live-checked on an 8 GB GPU without bf16, 16 GB RAM, 1080px output: 3B GGUF Q6_K — DiT step 7 s; 3B fp8 — 10 s;
 7B fp8 — 780 s. All three gave clean images. After the run the GPU drops back to about 1 GB used.
 
 - 🟠 R9 (S3×L3) **7B is practically unusable on 8 GB: no low-VRAM path.** 7B fp8 weights take 7.9 GB, the rest spills
-  into shared memory and the DiT step is ~80× slower than 3B. BlockSwap, DiT/VAE offload exist in `src/` but are fixed
+  into shared memory and the DiT step is ~80× slower than 3B. BlockSwap, DiT/VAE offload exist in `seedvr2_vendor/` but are fixed
   to "off" in `run()`; the UI offers 7B with no hint. Close: BlockSwap/offload in the UI, a warning for 7B on small GPUs. (B06)
 - 🟠 R9 (S3×L3) **"Force Reload" does not reload models.** It clears only `self.runner_cache` (the context);
   `GlobalModelCache` keeps the DiT/VAE, so a broken or swapped file with the same name is reused. (B06)
@@ -73,12 +72,12 @@ Live-checked on an 8 GB GPU without bf16, 16 GB RAM, 1080px output: 3B GGUF Q6_K
   1080×1080 VAE decode took 38 s in the first run and 117 s in the second (4.8 GB reserved before decode, 2.9 GB paged).
   Close: release the cache between phases, check with a live run. (B06)
 - 🟡 R6 (S2×L3) **SeedVR2 models stay in system RAM after the run.** With no offload device the cleanup moves DiT and VAE
-  to CPU for caching (`src/optimization/memory_manager.py`, cleanup of DiT/VAE), so 3–8 GB stay in RAM. Together with
+  to CPU for caching (`seedvr2_vendor/optimization/memory_manager.py`, cleanup of DiT/VAE), so 3–8 GB stay in RAM. Together with
   Forge's offloaded SD checkpoint a 16 GB system dropped to 0.03 GB free RAM. Close: "unload SeedVR2 after run". (B06)
 - 🟡 R6 (S2×L3) **"Unload SD Checkpoint" (on by default) costs a full checkpoint reload on every run** — about 2 minutes
   with a large checkpoint on the next generation. It is the price of freeing VRAM; the UI does not say so. (B06)
 - 🟡 R4 (S2×L2) **GPUs without bf16 (RTX 20xx / GTX 16xx) run the pipeline in emulated bf16.** The bf16 probe in
-  `src/optimization/compatibility.py` passes on current PyTorch, so DiT and VAE compute in bf16; results are clean.
+  `seedvr2_vendor/optimization/compatibility.py` passes on current PyTorch, so DiT and VAE compute in bf16; results are clean.
   Not measured: how much faster fp16 compute would be on these GPUs. (B06)
 - 🟡 R4 (S2×L2) **Cached context survives exceptions.** After an OOM mid-run, `self.runner_cache['ctx']` keeps partial
   state; the `finally` block deletes key names that do not exist (`images`, `encoded_latents`, `upscaled_latents`). (B06)
@@ -104,15 +103,7 @@ Live-checked on an 8 GB GPU without bf16, 16 GB RAM, 1080px output: 3B GGUF Q6_K
   Close: set `ctx['interrupt_fn']` to a Forge check and update `shared.state.job*` from `progress_callback`. (B08)
 
 ## 5. Code hygiene
-- 🟡 R6 (S2×L3) **`.gitignore` is UTF-16**, so git ignored none of its rules and `__pycache__/*.pyc` (Python 3.11) are
-  committed. `.gitignore` is rewritten in UTF-8; the tracked `.pyc` files still need `git rm -r --cached`. (B04)
-- 🟡 R4 (S2×L2) **Top-level package name `src`.** Another extension that also ships `src` and is imported first wins
-  (`sys.modules` cache); Forge keeps every extension folder on `sys.path`. `run()` detects it and stops with a one-line
-  error naming the other package (`seedvr2_neo/package_check.py`); upscaling still does not work while both are installed. (B04)
-- 🟡 R4 (S2×L2) **No LICENSE / attribution.** `src/` is a copy of ComfyUI-SeedVR2_VideoUpscaler (Apache-2.0) with local
-  patches, which requires shipping the license text, a notice, and a change notice in modified files (§4(b)). (B04)
 - 🟢 R3 (S1×L3) **No CI; `scripts/seedvr2_script.py` has no tests** (needs Forge stubs). (B09)
-- 🟢 R2 (S1×L2) **Unused `download_weight` import** in `scripts/seedvr2_script.py`. (ComfyUI files are kept on purpose — `05-DECISIONS.md`.) (B04)
 
 ## Top risks
 1. 🟠 R9 7B practically unusable on 8 GB, no low-VRAM path — section 3.
@@ -122,6 +113,4 @@ Live-checked on an 8 GB GPU without bf16, 16 GB RAM, 1080px output: 3B GGUF Q6_K
 5. 🟡 R6 SeedVR2 models stay in system RAM after the run — section 3.
 6. 🟡 R6 SD checkpoint reload on every run — section 3.
 7. 🟡 R6 Result infotext lost — section 4.
-8. 🟡 R6 `.gitignore` in UTF-16, `.pyc` committed — section 5.
-9. 🟡 R4 Corrupt GGUF header can hang the WebUI — section 1.
-10. 🟡 R4 Package name `src` can collide (now reported, not fixed) — section 5.
+8. 🟡 R4 Corrupt GGUF header can hang the WebUI — section 1.
