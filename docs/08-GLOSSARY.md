@@ -35,6 +35,14 @@ Terms in plain words. A new term comes up in conversation — add it here right 
 - **xfail test** — a test that is expected to fail because it reproduces a known, not yet fixed bug.
 - **VAE tiling** — encoding/decoding the image in overlapping tiles to cut VRAM; tile size and overlap are set in the UI.
 - **BlockSwap** — keeping part of the DiT blocks in RAM and moving them to the GPU one by one; slower, needs less VRAM.
+- **Reserved VRAM** — memory PyTorch keeps after tensors are freed, to reuse it quickly; other programs and the next
+  phase cannot use it until the cache is emptied.
+- **Shared memory spill** — on Windows, when a program needs more VRAM than the card has, the driver pages the excess
+  into system RAM ("shared GPU memory"); no error, but many times slower.
+- **`--cuda-malloc` (cudaMallocAsync)** — a Forge launch flag that switches PyTorch to another VRAM allocator; changes
+  how much memory stays reserved, and so the speed on small GPUs.
+- **Keep in RAM / Unload** — what happens to the SeedVR2 models after a run: kept in system RAM for a faster next run,
+  or freed completely (default).
 - **Offload** — moving a model or tensors to the CPU when not in use.
 - **Input / latent noise scale** — noise added to the input image / to the latent before upscaling; more noise — more invented detail.
 - **LAB color correction** — matching the colors of the result to the input in LAB color space, to avoid color shift.
