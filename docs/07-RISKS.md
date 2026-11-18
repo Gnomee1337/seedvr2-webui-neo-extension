@@ -39,7 +39,8 @@ Every risk and every bug found gets a rating **R = S × L** and an icon based on
   file declaring 10^6 items took ~650 MB and 23 s; a value near 2^63 hangs the WebUI. Both `seedvr2_vendor/utils/dit_size.py` and
   the loader (`seedvr2_vendor/core/model_loader.py`) use it. Truncated downloads do not trigger it (the header stays intact).
   Repro: `test_gguf_with_absurd_array_length_does_not_grow_memory` (strict xfail). Close: bounded own GGUF header parser.
-  The header is also read when a DiT is selected in the dropdown (the 7B low-VRAM note), so such a file hangs the UI on selection.
+  The header is also read for the 7B low-VRAM note: for the default DiT when Forge builds the UI, and on every DiT
+  selection — so such a file as the default DiT hangs Forge at startup.
 - 🟢 R2 (S2×L1) **A VAE without `vae` in its name is listed as a DiT**; the note then says no VAE was found. Rename the file.
 - 🟢 R2 (S2×L1) **`find_model_file` falls back to the working-directory scan if the chosen file vanished** between the
   scan and the load (`seedvr2_vendor/utils/constants.py`), and raises `NotADirectoryError` if `./models/SEEDVR2` there is a file.
@@ -76,6 +77,8 @@ Live-checked on an 8 GB GPU without bf16, 16 GB RAM, 1080px output: 3B GGUF Q6_K
 - 🟡 R4 (S2×L2) **GPUs without bf16 (RTX 20xx / GTX 16xx) run the pipeline in emulated bf16.** The bf16 probe in
   `seedvr2_vendor/optimization/compatibility.py` passes on current PyTorch, so DiT and VAE compute in bf16; results are clean.
   Not measured: how much faster fp16 compute would be on these GPUs. (B06)
+- 🟢 R2 (S2×L1) **No low-VRAM note for 7B fp16 on 12–16 GB GPUs.** The 11 GiB threshold is sized for 7B fp8 (~7.9 GB of
+  weights); 7B fp16 (~16 GB) does not fit those GPUs either. Close: a threshold from the DiT file size instead of a fixed one.
 - 🟢 R2 (S2×L1) **Calls with the old argument list** (API payloads saved before the new controls) get the defaults
   for "After run" and BlockSwap: unload, BlockSwap off.
 

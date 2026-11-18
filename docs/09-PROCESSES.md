@@ -66,8 +66,8 @@ The source of truth is the code.
 2. Seed: the UI value, or for `-1` — the generation's first seed, else `p.seed`, else random.
 3. Image → tensor `[1, H, W, C]` float16.
 4. Cached models (`GlobalModelCache`, ids `forge_dit` / `forge_vae`) are dropped before the run when "Force Reload" is on
-   or when the selected files are not the ones they were loaded from (absolute path, size, modification time —
-   `seedvr2_neo/loaded_models.py`).
+   or when the selected files are not the ones they were loaded from (absolute path, size, modification time, read at
+   this step — `seedvr2_neo/loaded_models.py`).
 5. Memory plan from the UI (`seedvr2_neo/memory_plan.py`): "Keep in RAM" → models cached; BlockSwap blocks > 0 or I/O
    layers on → DiT and VAE offload device = CPU (BlockSwap requires it; the VAE waits in RAM during the DiT step).
 6. A new generation context every run on Forge's device (`modules.devices.device`), tensors offloaded to CPU.

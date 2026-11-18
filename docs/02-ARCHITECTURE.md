@@ -72,8 +72,9 @@ No Forge, Gradio or torch imports; tested outside Forge.
 - `model_discovery.py` — `scan_models(models_path, extension_root)` → `ModelScan` (absolute folder, DiT and VAE file
   names, defaults); the user-facing note for missing models; the reason a selection cannot run.
 - `memory_plan.py` — `build_memory_plan(after_run, blocks_to_swap, swap_io_components)` → `MemoryPlan` (cache flag,
-  DiT/VAE offload devices, `block_swap_config()`); `AfterRun` (UI labels); `low_vram_warning(dit_size, total_vram_bytes)`.
-- `loaded_models.py` — `LoadedModelTracker`: which files (path, size, mtime) the cached models came from.
+  DiT/VAE offload devices, `block_swap_config()`); `AfterRun` (UI labels); `is_7b_checkpoint` (through the vendored
+  `utils/dit_size.py`, header only); `low_vram_warning(is_7b, total_vram_bytes)`.
+- `loaded_models.py` — `ModelFileIdentity` (path, size, mtime) and `LoadedModelTracker`: which files the cached models came from.
 - `model_lifecycle.py` — `ModelLifecycle`: drops the vendored cache before a run (Force Reload, other files) and after it
   (Unload, error, interrupt), then releases memory through a function the script passes in.
 

@@ -1,6 +1,7 @@
 import gc
 import os
 import sys
+from dataclasses import dataclass
 from types import SimpleNamespace
 from typing import Optional
 
@@ -25,7 +26,8 @@ if EXTENSION_ROOT not in sys.path:
     sys.path.insert(0, EXTENSION_ROOT)
 
 from seedvr2_neo.loaded_models import LoadedModelTracker
-from seedvr2_neo.memory_plan import MAX_BLOCKS_TO_SWAP, AfterRun, build_memory_plan, low_vram_warning
+from seedvr2_neo.memory_plan import (MAX_BLOCKS_TO_SWAP, AfterRun, MemoryPlan, build_memory_plan, is_7b_checkpoint,
+                                     low_vram_warning)
 from seedvr2_neo.model_discovery import ModelScan, describe_missing_models, find_selection_error, scan_models
 from seedvr2_neo.model_lifecycle import DIT_CACHE_ID, VAE_CACHE_ID, ModelLifecycle
 
@@ -80,13 +82,25 @@ def describe_vram_warning(scan: ModelScan, dit_model_name: Optional[str]) -> str
     """The 7B-on-a-small-GPU note for the selected DiT, or an empty string."""
     if not dit_model_name or scan.folder is None or dit_model_name not in scan.dit_models:
         return ""
-    try:
-        from seedvr2_vendor.utils.dit_size import choose_dit_size
-        dit_size = choose_dit_size(dit_model_name, os.path.join(scan.folder, dit_model_name)).size.value
-    except Exception as e:  # UI boundary: a failed check must not break the model dropdown
-        print(f"[SeedVR2] Cannot check the DiT size of {dit_model_name}: {e}")
-        return ""
-    return low_vram_warning(dit_size, get_total_vram_bytes()) or ""
+    is_7b = is_7b_checkpoint(dit_model_name, os.path.join(scan.folder, dit_model_name))
+    return low_vram_warning(is_7b, get_total_vram_bytes()) or ""
+
+
+@dataclass(frozen=True)
+class UpscaleRequest:
+    """Everything one pipeline run needs from the UI, already converted to plain types."""
+
+    dit_model: str
+    vae_model: str
+    model_dir: str
+    memory_plan: MemoryPlan
+    seed: int
+    resolution: int
+    input_noise: float
+    latent_noise: float
+    use_tile_vae: bool
+    tile_size: int
+    tile_overlap: int
 
 
 # Custom exception used to stop SeedVR2 cleanly when the user presses Interrupt
@@ -260,10 +274,12 @@ class Script(scripts.Script):
             debug = pipeline.Debug(enabled=debug_mode)
             check_interruption()
 
-            output_tensor = self._upscale_tensor(
-                pipeline, img_tensor, dit_model_name, vae_model_name, scan.folder, memory_plan, int(actual_seed),
-                int(resolution), float(input_noise), float(latent_noise), use_tile_vae, int(tile_size),
-                int(tile_overlap), debug, debug_mode, check_interruption)
+            request = UpscaleRequest(
+                dit_model=dit_model_name, vae_model=vae_model_name, model_dir=scan.folder, memory_plan=memory_plan,
+                seed=int(actual_seed), resolution=int(resolution), input_noise=float(input_noise),
+                latent_noise=float(latent_noise), use_tile_vae=bool(use_tile_vae), tile_size=int(tile_size),
+                tile_overlap=int(tile_overlap))
+            output_tensor = self._upscale_tensor(pipeline, img_tensor, request, debug, debug_mode, check_interruption)
             succeeded = True
 
             # Convert the output tensor back to a PIL image
@@ -309,15 +325,12 @@ class Script(scripts.Script):
 
         finally:
             output_tensor = None
-            keep_models = memory_plan.cache_models and succeeded
-            MODEL_LIFECYCLE.finish_run(model_cache, memory_plan.cache_models, succeeded, dit_path, vae_path)
-            print("[SeedVR2] Models kept in RAM for the next run." if keep_models
+            kept = MODEL_LIFECYCLE.finish_run(model_cache, memory_plan.cache_models, succeeded)
+            print("[SeedVR2] Models kept in RAM for the next run." if kept
                   else "[SeedVR2] Models unloaded, memory released.")
 
     @staticmethod
-    def _upscale_tensor(pipeline, img_tensor, dit_model_name, vae_model_name, model_dir, memory_plan, seed, resolution,
-                        input_noise, latent_noise, use_tile_vae, tile_size, tile_overlap, debug, debug_mode,
-                        check_interruption):
+    def _upscale_tensor(pipeline, img_tensor, request: UpscaleRequest, debug, debug_mode, check_interruption):
         """Run the four SeedVR2 phases on one [1, H, W, C] image tensor and return the pipeline's output tensor.
 
         The generation context is built fresh every run, so nothing from a failed or interrupted run is reused. The
@@ -325,56 +338,56 @@ class Script(scripts.Script):
         ctx = pipeline.setup_generation_context(
             dit_device=devices.device,
             vae_device=devices.device,
-            dit_offload_device=memory_plan.dit_offload_device,
-            vae_offload_device=memory_plan.vae_offload_device,
+            dit_offload_device=request.memory_plan.dit_offload_device,
+            vae_offload_device=request.memory_plan.vae_offload_device,
             tensor_offload_device="cpu",
             debug=debug
         )
 
         runner, cache_context = pipeline.prepare_runner(
-            dit_model=dit_model_name,
-            vae_model=vae_model_name,
-            model_dir=model_dir,
+            dit_model=request.dit_model,
+            vae_model=request.vae_model,
+            model_dir=request.model_dir,
             debug=debug,
             ctx=ctx,
-            dit_cache=memory_plan.cache_models,
-            vae_cache=memory_plan.cache_models,
+            dit_cache=request.memory_plan.cache_models,
+            vae_cache=request.memory_plan.cache_models,
             dit_id=DIT_CACHE_ID,
             vae_id=VAE_CACHE_ID,
-            block_swap_config=memory_plan.block_swap_config(),
-            encode_tiled=use_tile_vae,
-            encode_tile_size=(tile_size, tile_size),
-            encode_tile_overlap=(tile_overlap, tile_overlap),
-            decode_tiled=use_tile_vae,
-            decode_tile_size=(tile_size, tile_size),
-            decode_tile_overlap=(tile_overlap, tile_overlap),
+            block_swap_config=request.memory_plan.block_swap_config(),
+            encode_tiled=request.use_tile_vae,
+            encode_tile_size=(request.tile_size, request.tile_size),
+            encode_tile_overlap=(request.tile_overlap, request.tile_overlap),
+            decode_tiled=request.use_tile_vae,
+            decode_tile_size=(request.tile_size, request.tile_size),
+            decode_tile_overlap=(request.tile_overlap, request.tile_overlap),
             tile_debug="false", attention_mode="sdpa",
             torch_compile_args_dit=None, torch_compile_args_vae=None
         )
         ctx['cache_context'] = cache_context
 
-        frames_tensor, gen_info = pipeline.compute_generation_info(
-            ctx=ctx, images=img_tensor, resolution=resolution, max_resolution=0,
-            batch_size=1, uniform_batch_size=False, seed=seed,
+        frames_tensor, _generation_info = pipeline.compute_generation_info(
+            ctx=ctx, images=img_tensor, resolution=request.resolution, max_resolution=0,
+            batch_size=1, uniform_batch_size=False, seed=request.seed,
             prepend_frames=0, temporal_overlap=0, debug=debug
         )
 
-        if not debug_mode: print(f"[SeedVR2] Phase 1/4: Encoding {'(Tiled)' if use_tile_vae else ''}...")
-        ctx = pipeline.encode_all_batches(runner, ctx=ctx, images=frames_tensor, debug=debug, batch_size=1, uniform_batch_size=False, seed=seed,
+        if not debug_mode: print(f"[SeedVR2] Phase 1/4: Encoding {'(Tiled)' if request.use_tile_vae else ''}...")
+        ctx = pipeline.encode_all_batches(runner, ctx=ctx, images=frames_tensor, debug=debug, batch_size=1, uniform_batch_size=False, seed=request.seed,
                                           progress_callback=check_interruption,
-                                          temporal_overlap=0, resolution=resolution, max_resolution=0, input_noise_scale=input_noise, color_correction="lab")
+                                          temporal_overlap=0, resolution=request.resolution, max_resolution=0, input_noise_scale=request.input_noise, color_correction="lab")
         devices.torch_gc()
 
         if not debug_mode: print("[SeedVR2] Phase 2/4: Upscaling...")
         ctx = pipeline.upscale_all_batches(runner, ctx=ctx, debug=debug,
                                            progress_callback=check_interruption,
-                                           seed=seed, latent_noise_scale=latent_noise, cache_model=memory_plan.cache_models)
+                                           seed=request.seed, latent_noise_scale=request.latent_noise, cache_model=request.memory_plan.cache_models)
         devices.torch_gc()
 
-        if not debug_mode: print(f"[SeedVR2] Phase 3/4: Decoding {'(Tiled)' if use_tile_vae else ''}...")
+        if not debug_mode: print(f"[SeedVR2] Phase 3/4: Decoding {'(Tiled)' if request.use_tile_vae else ''}...")
         ctx = pipeline.decode_all_batches(runner, ctx=ctx, debug=debug,
                                           progress_callback=check_interruption,
-                                          cache_model=memory_plan.cache_models)
+                                          cache_model=request.memory_plan.cache_models)
         devices.torch_gc()
 
         if not debug_mode: print("[SeedVR2] Phase 4/4: Post-processing...")

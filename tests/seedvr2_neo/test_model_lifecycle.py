@@ -37,6 +37,12 @@ class Lifecycle:
     def _release(self):
         self.releases += 1
 
+    def run(self, cache, dit, vae, keep_models, succeeded=True, force_reload=False):
+        """One whole run: prepare, then finish. Returns (dropped before, kept after)."""
+        dropped = self.lifecycle.prepare_run(cache, dit, vae, force_reload)
+        kept = self.lifecycle.finish_run(cache, keep_models, succeeded)
+        return dropped, kept
+
 
 def make_models(tmp_path):
     (tmp_path / DIT).write_bytes(b"dit")
@@ -60,7 +66,8 @@ def test_first_run_drops_whatever_is_cached(tmp_path):
 def test_kept_models_are_reused_for_the_same_files(tmp_path):
     dit, vae = make_models(tmp_path)
     life, cache = Lifecycle(), full_cache()
-    life.lifecycle.finish_run(cache, keep_models=True, succeeded=True, dit_path=dit, vae_path=vae)
+    assert life.run(cache, dit, vae, keep_models=True)[1] is True
+    cache.cached = {DIT_CACHE_ID, VAE_CACHE_ID}  # the pipeline cached them during the run
 
     assert life.lifecycle.prepare_run(cache, dit, vae, force_reload=False) is False
     assert cache.cached == {DIT_CACHE_ID, VAE_CACHE_ID}
@@ -69,7 +76,8 @@ def test_kept_models_are_reused_for_the_same_files(tmp_path):
 def test_force_reload_drops_kept_models(tmp_path):
     dit, vae = make_models(tmp_path)
     life, cache = Lifecycle(), full_cache()
-    life.lifecycle.finish_run(cache, keep_models=True, succeeded=True, dit_path=dit, vae_path=vae)
+    life.run(cache, dit, vae, keep_models=True)
+    cache.cached = {DIT_CACHE_ID, VAE_CACHE_ID}
 
     assert life.lifecycle.prepare_run(cache, dit, vae, force_reload=True) is True
     assert cache.cached == set()
@@ -78,44 +86,66 @@ def test_force_reload_drops_kept_models(tmp_path):
 def test_changed_file_drops_kept_models(tmp_path):
     dit, vae = make_models(tmp_path)
     life, cache = Lifecycle(), full_cache()
-    life.lifecycle.finish_run(cache, keep_models=True, succeeded=True, dit_path=dit, vae_path=vae)
+    life.run(cache, dit, vae, keep_models=True)
+    cache.cached = {DIT_CACHE_ID, VAE_CACHE_ID}
     with open(dit, "wb") as f:
         f.write(b"replaced with a bigger file")
 
     assert life.lifecycle.prepare_run(cache, dit, vae, force_reload=False) is True
 
 
+def test_file_replaced_during_the_run_is_not_trusted_next_time(tmp_path):
+    dit, vae = make_models(tmp_path)
+    life, cache = Lifecycle(), FakeCache()
+    life.lifecycle.prepare_run(cache, dit, vae, force_reload=False)
+    with open(dit, "wb") as f:  # replaced while the old weights were being loaded
+        f.write(b"replaced with a bigger file")
+    life.lifecycle.finish_run(cache, keep_models=True, succeeded=True)
+
+    assert life.lifecycle.prepare_run(full_cache(), dit, vae, force_reload=False) is True
+
+
 def test_unload_mode_drops_models_after_a_successful_run(tmp_path):
     dit, vae = make_models(tmp_path)
-    life, cache = Lifecycle(), full_cache()
+    life, cache = Lifecycle(), FakeCache()
+    life.lifecycle.prepare_run(cache, dit, vae, force_reload=False)
+    cache.cached = {DIT_CACHE_ID, VAE_CACHE_ID}
 
-    life.lifecycle.finish_run(cache, keep_models=False, succeeded=True, dit_path=dit, vae_path=vae)
-
+    assert life.lifecycle.finish_run(cache, keep_models=False, succeeded=True) is False
     assert cache.cached == set()
-    assert life.releases == 1
 
 
 def test_failed_run_drops_models_even_in_keep_mode(tmp_path):
     dit, vae = make_models(tmp_path)
-    life, cache = Lifecycle(), full_cache()
+    life, cache = Lifecycle(), FakeCache()
+    life.lifecycle.prepare_run(cache, dit, vae, force_reload=False)
+    cache.cached = {DIT_CACHE_ID, VAE_CACHE_ID}
 
-    life.lifecycle.finish_run(cache, keep_models=True, succeeded=False, dit_path=dit, vae_path=vae)
-
+    assert life.lifecycle.finish_run(cache, keep_models=True, succeeded=False) is False
     assert cache.cached == set()
     # and nothing is trusted afterwards
-    assert life.lifecycle.prepare_run(FakeCache(), dit, vae, force_reload=False) is False
     assert life.lifecycle.prepare_run(full_cache(), dit, vae, force_reload=False) is True
 
 
-def test_memory_is_released_after_every_run_even_with_an_empty_cache(tmp_path):
+def test_finish_without_prepare_keeps_nothing(tmp_path):
+    life, cache = Lifecycle(), full_cache()
+
+    assert life.lifecycle.finish_run(cache, keep_models=True, succeeded=True) is False
+    assert cache.cached == set()
+
+
+def test_memory_is_released_once_per_finish(tmp_path):
     dit, vae = make_models(tmp_path)
-    for keep, succeeded in [(True, True), (False, True), (True, False), (False, False)]:
-        life = Lifecycle()
-        life.lifecycle.finish_run(FakeCache(), keep_models=keep, succeeded=succeeded, dit_path=dit, vae_path=vae)
+    for keep, succeeded, cached in [(True, True, ()), (False, True, ()), (True, False, ()), (False, False, ()),
+                                    (False, True, (DIT_CACHE_ID, VAE_CACHE_ID))]:
+        life, cache = Lifecycle(), FakeCache()
+        life.lifecycle.prepare_run(cache, dit, vae, force_reload=False)
+        cache.cached = set(cached)
+        life.lifecycle.finish_run(cache, keep_models=keep, succeeded=succeeded)
         assert life.releases == 1
 
 
-def test_unload_removes_both_ids_and_reports_empty_cache(tmp_path):
+def test_unload_removes_both_ids_and_reports_empty_cache():
     life, cache = Lifecycle(), FakeCache()
 
     assert life.lifecycle.unload(cache) is False
@@ -123,7 +153,7 @@ def test_unload_removes_both_ids_and_reports_empty_cache(tmp_path):
     assert life.releases == 0
 
 
-def test_partial_cache_is_dropped(tmp_path):
+def test_partial_cache_is_dropped():
     life, cache = Lifecycle(), FakeCache(cached={VAE_CACHE_ID})
 
     assert life.lifecycle.unload(cache) is True

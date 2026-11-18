@@ -3,12 +3,15 @@
 `build_memory_plan` turns the "After run" choice and the BlockSwap controls into the
 offload devices and cache flags the vendored pipeline expects (`seedvr2_vendor/core/generation_utils.py`,
 `seedvr2_vendor/optimization/blockswap.py`). `low_vram_warning` gives the note shown when a 7B DiT is selected on a
-small GPU. No Forge, Gradio or torch imports: the script (`scripts/seedvr2_script.py`) passes plain values in.
+small GPU. No Forge, Gradio or torch imports (the vendored `dit_size` reads only file headers): the script
+(`scripts/seedvr2_script.py`) passes plain values in.
 """
 
 from dataclasses import dataclass
 from enum import Enum
 from typing import Any, Dict, Optional
+
+from seedvr2_vendor.utils.dit_size import DitSize, choose_dit_size
 
 # The vendored pipeline offloads to the CPU by device name; it accepts a string as well as a torch.device.
 CPU_DEVICE = "cpu"
@@ -77,13 +80,18 @@ def clamp_blocks_to_swap(value: Any) -> int:
     return max(0, min(blocks, MAX_BLOCKS_TO_SWAP))
 
 
-def low_vram_warning(dit_size: Optional[str], total_vram_bytes: Optional[int]) -> Optional[str]:
+def is_7b_checkpoint(dit_model: str, checkpoint_path: str) -> bool:
+    """True for a 7B DiT, judged the same way the pipeline picks its config (header first, then the file name)."""
+    return choose_dit_size(dit_model, checkpoint_path).size is DitSize.B7
+
+
+def low_vram_warning(is_7b: bool, total_vram_bytes: Optional[int]) -> Optional[str]:
     """The note for a 7B DiT on a GPU below the threshold, or None.
 
-    `dit_size` is "3b" / "7b" (`seedvr2_vendor/utils/dit_size.py`); an unknown size or GPU size gives no note, since a
-    wrong warning is worse than none.
+    The caller tells the size from the checkpoint (`seedvr2_vendor/utils/dit_size.py`); an unknown GPU size gives no
+    note, since a wrong warning is worse than none.
     """
-    if dit_size != "7b" or not total_vram_bytes or total_vram_bytes <= 0:
+    if not is_7b or not total_vram_bytes or total_vram_bytes <= 0:
         return None
     total_gib = total_vram_bytes / _BYTES_PER_GIB
     if total_gib >= LOW_VRAM_7B_THRESHOLD_GIB:

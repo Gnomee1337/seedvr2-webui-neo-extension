@@ -14,85 +14,86 @@ def make_models(folder, dit_bytes=b"dit", vae_bytes=b"vae"):
     return str(folder / DIT), str(folder / VAE)
 
 
+def identities(dit, vae):
+    return read_model_file_identity(dit), read_model_file_identity(vae)
+
+
+def tracker_remembering(dit, vae):
+    tracker = LoadedModelTracker()
+    tracker.remember(*identities(dit, vae))
+    return tracker
+
+
 def test_empty_tracker_trusts_nothing(tmp_path):
     dit, vae = make_models(tmp_path)
 
-    assert LoadedModelTracker().is_cache_valid_for(dit, vae) is False
+    assert LoadedModelTracker().is_cache_valid_for(*identities(dit, vae)) is False
 
 
 def test_same_files_are_trusted(tmp_path):
     dit, vae = make_models(tmp_path)
-    tracker = LoadedModelTracker()
-    tracker.remember(dit, vae)
 
-    assert tracker.is_cache_valid_for(dit, vae) is True
+    assert tracker_remembering(dit, vae).is_cache_valid_for(*identities(dit, vae)) is True
 
 
 def test_same_name_in_another_folder_is_not_trusted(tmp_path):
     dit, vae = make_models(tmp_path / "webui" / "models" / "SeedVR2")
     other_dit, other_vae = make_models(tmp_path / "ext" / "models")
-    tracker = LoadedModelTracker()
-    tracker.remember(dit, vae)
+    tracker = tracker_remembering(dit, vae)
 
-    assert tracker.is_cache_valid_for(other_dit, vae) is False
-    assert tracker.is_cache_valid_for(dit, other_vae) is False
+    assert tracker.is_cache_valid_for(*identities(other_dit, vae)) is False
+    assert tracker.is_cache_valid_for(*identities(dit, other_vae)) is False
 
 
 def test_file_replaced_in_place_is_not_trusted(tmp_path):
     dit, vae = make_models(tmp_path)
-    tracker = LoadedModelTracker()
-    tracker.remember(dit, vae)
+    tracker = tracker_remembering(dit, vae)
 
     with open(dit, "wb") as f:
         f.write(b"another model of another size")
 
-    assert tracker.is_cache_valid_for(dit, vae) is False
+    assert tracker.is_cache_valid_for(*identities(dit, vae)) is False
 
 
 def test_file_with_same_size_but_new_mtime_is_not_trusted(tmp_path):
     dit, vae = make_models(tmp_path)
-    tracker = LoadedModelTracker()
-    tracker.remember(dit, vae)
+    tracker = tracker_remembering(dit, vae)
 
     stat = os.stat(dit)
     os.utime(dit, ns=(stat.st_atime_ns, stat.st_mtime_ns + 1_000_000_000))
 
-    assert tracker.is_cache_valid_for(dit, vae) is False
+    assert tracker.is_cache_valid_for(*identities(dit, vae)) is False
 
 
 def test_deleted_file_is_not_trusted(tmp_path):
     dit, vae = make_models(tmp_path)
-    tracker = LoadedModelTracker()
-    tracker.remember(dit, vae)
+    tracker = tracker_remembering(dit, vae)
 
     os.remove(vae)
 
-    assert tracker.is_cache_valid_for(dit, vae) is False
+    assert tracker.is_cache_valid_for(*identities(dit, vae)) is False
 
 
 def test_forget_drops_trust(tmp_path):
     dit, vae = make_models(tmp_path)
-    tracker = LoadedModelTracker()
-    tracker.remember(dit, vae)
+    tracker = tracker_remembering(dit, vae)
     tracker.forget()
 
-    assert tracker.is_cache_valid_for(dit, vae) is False
+    assert tracker.is_cache_valid_for(*identities(dit, vae)) is False
 
 
 def test_remembering_missing_files_trusts_nothing(tmp_path):
-    tracker = LoadedModelTracker()
-    tracker.remember(str(tmp_path / "missing_dit"), str(tmp_path / "missing_vae"))
+    missing = (str(tmp_path / "missing_dit"), str(tmp_path / "missing_vae"))
+    tracker = tracker_remembering(*missing)
 
-    assert tracker.is_cache_valid_for(str(tmp_path / "missing_dit"), str(tmp_path / "missing_vae")) is False
+    assert tracker.is_cache_valid_for(*identities(*missing)) is False
 
 
-def test_relative_and_absolute_paths_match(tmp_path, monkeypatch):
-    dit, vae = make_models(tmp_path)
+def test_relative_and_absolute_paths_give_the_same_identity(tmp_path, monkeypatch):
+    dit, _ = make_models(tmp_path)
     monkeypatch.chdir(tmp_path)
-    tracker = LoadedModelTracker()
-    tracker.remember(DIT, VAE)
 
-    assert tracker.is_cache_valid_for(dit, vae) is True
+    assert read_model_file_identity(DIT) == read_model_file_identity(dit)
 
 
 def test_missing_path_has_no_identity(tmp_path):
