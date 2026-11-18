@@ -99,6 +99,7 @@ def test_7b_on_8_gb_gpu_gets_a_warning():
     assert warning is not None
     assert "8.0 GB" in warning
     assert "BlockSwap" in warning
+    assert f"{mp.RECOMMENDED_7B_BLOCKS_TO_SWAP} blocks" in warning
 
 
 @pytest.mark.parametrize("is_7b, total", [

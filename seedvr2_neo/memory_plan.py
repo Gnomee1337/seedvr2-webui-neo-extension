@@ -21,6 +21,10 @@ MAX_BLOCKS_TO_SWAP = 36
 # (8, 10 and 11 GB cards) spill into shared memory without BlockSwap.
 LOW_VRAM_7B_THRESHOLD_GIB = 11.0
 
+# Measured with 7B fp8 at 1080p on an 8 GB GPU: 16 blocks left ~1.7 GB free with both PyTorch allocators (DiT step
+# 34-42 s); 8 blocks fit only with cudaMallocAsync and fell to 120 s without it; 4 blocks spilled (300 s).
+RECOMMENDED_7B_BLOCKS_TO_SWAP = 16
+
 _BYTES_PER_GIB = 1024 ** 3
 
 
@@ -104,7 +108,8 @@ def low_vram_warning(is_7b: bool, total_vram_bytes: Optional[int]) -> Optional[s
     if total_gib >= LOW_VRAM_7B_THRESHOLD_GIB:
         return None
     return (f"⚠️ 7B model on a {total_gib:.1f} GB GPU: without BlockSwap it spills into shared memory and runs many times "
-            f"slower. Turn on BlockSwap below (more blocks = less VRAM, slower), or use a 3B model.")
+            f"slower. Turn on BlockSwap below: start with {RECOMMENDED_7B_BLOCKS_TO_SWAP} blocks (more blocks = less VRAM, "
+            f"slower), or use a 3B model.")
 
 
 def _parse_after_run(value: str) -> AfterRun:

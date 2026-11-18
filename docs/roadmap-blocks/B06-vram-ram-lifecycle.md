@@ -93,5 +93,21 @@ Run Forge with the extension on this branch, an 8 GB GPU, 1080px output. Watch t
 7. 3B GGUF with BlockSwap 16: clean image (or the error, if it does not work).
 8. Watch for "VRAM overflow … paged to system RAM" lines in the debug log (Show Debug Logs on) in run 1.
 
+## Live check results (8 GB GPU without bf16, 1080px, tile 512 unless noted)
+Runs 1–2 by the owner through the UI, the rest through Forge's API (img2img with the script) with the owner's flags.
+- 1 ✅ Unload: "DiT not cached - skipping CPU movement"; RAM did not grow at the end of Phase 2; the DiT's 3.2 GB VRAM
+  is returned by the between-phase `gc.collect()` + empty-cache (still allocated right after the phase); GPU back to
+  ~0.6 GB used after the run.
+- 2 ✅ Keep in RAM: second run "Reusing cached runner / DiT / VAE", no disk reads; DiT CPU→GPU 11.8 s vs 28 s from disk.
+- 3 ✅ Force Reload: "Cached models dropped…", both models read from disk, the old copies freed (process RAM 1.2 GB).
+- 4 ✅ Interrupt in Phase 2 (Keep in RAM): "Interrupted", then "Models unloaded"; next run clean.
+- 5 ⬜ 7B warning in the UI — owner to check.
+- 6 ✅ 7B fp8, DiT step (was 780 s): BlockSwap 16 → 34.5 s, 8 → 21 s (0 GB free), 4 → 297 s (spill), 8 + I/O → 22.8 s;
+  image clean. Without `--cuda-malloc`: 16 → 42 s, 8 → 122 s. Recommended: 16 (in the warning).
+- 7 ✅ 3B GGUF Q6_K + BlockSwap 16: works, image clean (DiT 17 s; without BlockSwap 7 s — 3B needs none).
+- 8 VAE decode spill: with `--cuda-malloc` (cudaMallocAsync) the decode reserves 8.7 GB at a 5.2 GB peak, pages
+  0.7–2.9 GB and takes 25–137 s; without it 6.7 GB reserved, no overflow, 12.4 s stable. Tile 512 vs 1024 (with
+  `--cuda-malloc`): encode 5.7 s vs 16 s and no spill; decode spill 0.9 vs 2.9 GB.
+
 ## Open questions
 None.
