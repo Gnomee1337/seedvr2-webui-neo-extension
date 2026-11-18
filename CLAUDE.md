@@ -22,7 +22,8 @@ Then wait for a command.
   no models, no `__pycache__`.
 
 - **Structure:** `scripts/seedvr2_script.py` — the only Forge entry point (the Script class, UI and the
-  txt2img/img2img flow). `src/` — the vendored SeedVR2 pipeline (port of ComfyUI-SeedVR2_VideoUpscaler v2.5.24).
+  txt2img/img2img flow). `seedvr2_neo/` — our helpers without Forge imports (model discovery).
+  `tests/` — pytest (`python -m pytest tests`). `src/` — the vendored SeedVR2 pipeline (port of ComfyUI-SeedVR2_VideoUpscaler v2.5.24).
   `configs_3b/`, `configs_7b/` — model configs; `pos_emb.pt`, `neg_emb.pt` — precomputed text embeddings;
   `install.py` — dependencies installed by Forge at launch. Code paths in the docs are relative to the repository root.
 
@@ -38,8 +39,8 @@ Then wait for a command.
   unloading their SD checkpoint, files saved into their output folders. No kill-switch flags, no `.env`.
 
 - **Stack:** Python 3.10+ inside the Forge Neo process; PyTorch, Gradio (Forge's), OmegaConf, einops, diffusers,
-  `rotary-embedding-torch`, `gguf`. Tests: none yet — planned `pytest` with Forge modules stubbed,
-  `tests/` mirroring the code folders. **Changed code — update or add tests in the mirrored
+  `rotary-embedding-torch`, `gguf`. Tests: `pytest` outside Forge (`requirements-dev.txt`), `tests/` mirroring the
+  code folders; the script itself is not covered yet (Forge stubs planned). **Changed code — update or add tests in the mirrored
   folder in the same commit** (details — `docs/process/code-style.md`).
 
 - **Language:** documentation, comments, docstrings, commit messages — English; communication with

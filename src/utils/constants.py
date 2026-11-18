@@ -118,6 +118,13 @@ def find_model_file(filename: str, fallback_dir: Optional[str] = None) -> str:
     Returns:
         str: Full path to the model file
     """
+    # Local patch (Forge Neo): the caller's folder wins. The scan below is relative to the
+    # process working directory, which in Forge is wherever the launcher was started from.
+    if fallback_dir:
+        explicit_path = os.path.join(fallback_dir, filename)
+        if os.path.isfile(explicit_path):
+            return explicit_path
+
     # Get all model files
     model_files = get_all_model_files()
     

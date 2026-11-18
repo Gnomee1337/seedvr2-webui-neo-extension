@@ -23,6 +23,11 @@ Docs, comments, docstrings and commit messages — English; the owner is address
 ### Tests mirror the code folders
 Why: from a file's path you immediately see where its tests are, and vice versa.
 
+### `pytest.ini` lives in `tests/`, tests run as `python -m pytest tests`
+Why: the root holds ComfyUI's package `__init__.py` (kept unchanged); with the ini in the root pytest imports it and fails.
+A root `conftest.py` hook cannot stop that (hooks for the root come from its parent), and `--rootdir` in `addopts` is ignored.
+Default import mode: importlib mode would register `tests/src` as the `src` package and hide the real one.
+
 ### Branches: simplified Git Flow
 Why: one developer, no versioned releases yet. `main` + short `feature/*` / `fix/*` branches merged back with green CI.
 Switch to full Git Flow when releases are tagged and users pin versions. Agreed with the owner.
@@ -41,13 +46,24 @@ copying it makes the extension self-contained. Pitfall: upstream fixes do not ar
 listed in `docs/external-apis/seedvr2-upstream.md` so a sync does not lose them.
 
 ### Fix in `scripts/` first, patch `src/` only when unavoidable
-Why: every change to vendored code makes the next upstream sync harder.
+Why: every change to vendored code makes the next upstream sync harder. A small marked patch is preferred over
+monkey-patching `src/` from the script: a patch conflict on sync is visible, a broken monkey-patch fails silently.
+Our own helpers that need no Forge imports live in `seedvr2_neo/` (a `.py` in `scripts/` would be loaded by Forge as a script).
 
 ### Only Forge Neo is supported; ComfyUI files stay but are not maintained
 Why: ComfyUI already has its own SeedVR2 node pack (the upstream). The root `__init__.py` and `src/interfaces/` are ComfyUI entry
 points, never loaded by Forge; they are kept untouched so `diff -r` against upstream stays clean. Not fixed, not tested here.
 
 ## Forge integration
+
+### Models live in Forge's `models/SeedVR2`; the extension's own `models/` is only a fallback
+Why: the owner's choice — users keep all models in one place, and it survives reinstalling the extension. The folder comes
+from `shared.models_path` (follows `--model-ref` / `--data-dir`), never from the working directory. A candidate folder
+without model files is skipped, so an empty folder in one place does not hide models in the other.
+
+### 3B or 7B is read from the checkpoint header, not from the file name
+Why: users rename files; a 7B built with the 3B config fails with a shape error. Block count (32 / 36) in the header is
+cheap to read and exact. The file name is only a fallback when the header cannot be read.
 
 ### A selectable Script, not an always-on script or an Extras upscaler
 Why (*reconstructed from code*): a Script owns `run()` and can replace the whole generation, which lets img2img skip

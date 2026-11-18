@@ -7,13 +7,15 @@
 
 **Branches.** `main` (fork of the original Chinese repository) holds the move onto the protocol and the live-test
 results; local `main` is 2 commits ahead of `origin/main` — **not pushed**, waiting for the owner's consent.
-Current work: `feature/b05-model-discovery`. No releases or tags.
+Current work: `feature/b05-model-discovery` (pushed to `origin` as a backup) — B05 code, docs and tests done,
+waiting for the owner's live run, then `/block-done` (see the B05 card, "Progress"). No releases or tags.
 
 The project runs on the protocol: English docs in `docs/`, README and the script's comments translated,
 `.gitignore` rewritten in UTF-8. Code behaviour is unchanged. Known problems are in `07-RISKS.md`,
 split into blocks B04–B09 in `03-ROADMAP.md`.
 
-`src/` and the `.pt` embeddings match upstream numz/ComfyUI-SeedVR2_VideoUpscaler `4490bd1` (no local patches).
+`src/` and the `.pt` embeddings match upstream numz/ComfyUI-SeedVR2_VideoUpscaler `4490bd1`, plus the B05 local
+patches listed in `external-apis/seedvr2-upstream.md`.
 What to borrow from wdhameli0/sd-webui-forge-neo-seedvr2 is in `external-apis/seedvr2-upstream.md`.
 
 **Live test done (B02 closed)** on an 8 GB GPU without bf16, current Forge Neo, txt2img: 3B GGUF Q6_K, 3B fp8 and
@@ -21,7 +23,7 @@ What to borrow from wdhameli0/sd-webui-forge-neo-seedvr2 is in `external-apis/se
 (VRAM spill); reserved VRAM grows between phases; models stay in system RAM after the run — details in `07-RISKS.md` §3.
 VRAM is back to ~1 GB after a run.
 
-Tests: none. CI: none.
+Tests: `python -m pytest tests` — 46 passed (B05 branch). CI: none.
 
 ## Completion percentage
 

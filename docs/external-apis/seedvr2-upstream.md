@@ -7,11 +7,18 @@ Facts about the code in `src/` and where it comes from. Each fact has a source.
 - **Pipeline code:** [numz/ComfyUI-SeedVR2_VideoUpscaler](https://github.com/numz/ComfyUI-SeedVR2_VideoUpscaler), version 2.5.24,
   commit `4490bd1` (upstream `HEAD`, no `v2.5.24` tag exists; last tag is `v2.5.23`). License: Apache-2.0 (upstream `LICENSE`).
 - **Verified live:** `src/`, `__init__.py`, `requirements.txt`, `configs_3b/main.yaml`, `configs_7b/main.yaml`, `pos_emb.pt`, `neg_emb.pt`
-  are identical to upstream `4490bd1` (SHA-256 of files, `diff -r` ignoring line endings). Only `scripts/` and `install.py` are ours.
+  are identical to upstream `4490bd1` (SHA-256 of files, `diff -r` ignoring line endings) except the "Local patches" below.
+  Ours: `scripts/`, `seedvr2_neo/`, `tests/`, `install.py`, `requirements-dev.txt`.
 
 ## Local patches
-Changes we made to vendored files. Re-apply after every upstream sync.
-- none
+Changes we made to vendored files. Re-apply after every upstream sync. Each is marked `Local patch (Forge Neo)` in the code.
+- `src/utils/constants.py`, `find_model_file`: when the caller passes a folder and the file exists there, that path is
+  returned first. Why: the upstream scan is relative to the working directory, which in Forge is wherever the launcher
+  was started. Test: `tests/src/utils/test_constants.py`.
+- `src/utils/dit_size.py` (new file): reads tensor names from the safetensors / GGUF header and maps the block count
+  (32 / 36) to 3B / 7B; unreadable header → `"7b"` in the name, case-insensitive. Tests: `tests/src/utils/test_dit_size*.py`.
+- `src/core/model_configuration.py`, `create_new_runner` (+ one import): the config folder comes from
+  `choose_dit_size` instead of `"7b" in dit_model`; the chosen size and its source are logged.
 
 ## Common pitfalls
 - **Caching requires an offload device.** Upstream's own loaders refuse `cache_model=True` without an offload device
@@ -22,9 +29,14 @@ Changes we made to vendored files. Re-apply after every upstream sync.
 - **Interrupt hook:** `setup_generation_context` sets `ctx['interrupt_fn']` only when ComfyUI is importable; outside ComfyUI it is `None`
   and the phases check interruption only through `progress_callback`. Setting `ctx['interrupt_fn']` to a Forge check gives
   interruption inside the phases. Source: `src/core/generation_utils.py`, `check_interrupt`.
-- **Config by file name:** `configs_7b` if `"7b" in dit_model`, else `configs_3b`. Source: `src/core/model_configuration.py`.
-- **Model lookup:** `find_model_file` searches ComfyUI `folder_paths` if present, else `./models/SEEDVR2` relative to the working
-  directory, then falls back to the given directory. Source: `src/utils/constants.py`.
+- **Config by file name (upstream):** `configs_7b` if `"7b" in dit_model` (case-sensitive), else `configs_3b` — replaced
+  here by a local patch. Source: `src/core/model_configuration.py`.
+- **Model lookup (upstream):** `find_model_file` searches ComfyUI `folder_paths` if present, else `./models/SEEDVR2` relative
+  to the working directory, then falls back to the given directory — the given directory now wins (local patch).
+  Source: `src/utils/constants.py`.
+- **Checkpoint layout:** DiT tensor names start with `blocks.<N>.` (`self.blocks` in `src/models/dit_*/nadit.py`); 3B has
+  32 blocks, 7B has 36 (`num_layers` in `configs_*/main.yaml`). Checked on the official 3B fp16, 3B fp8 and 7B sharp fp8
+  safetensors; GGUF files not checked yet.
 - **Text embeddings** are loaded with `torch.load(..., weights_only=True)` — no pickled code is executed. Source: `src/core/generation_utils.py`.
 
 ## Model files

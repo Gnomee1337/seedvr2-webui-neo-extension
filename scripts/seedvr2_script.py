@@ -3,7 +3,8 @@ import sys
 import gradio as gr
 from modules import scripts, processing, images, shared
 from modules.processing import Processed, create_infotext, StableDiffusionProcessingTxt2Img
-from modules.ui_components import FormRow
+from modules.ui_common import refresh_symbol
+from modules.ui_components import FormRow, ToolButton
 from torchvision import transforms
 import torch
 import numpy as np
@@ -13,15 +14,18 @@ import random
 # Forge model management (used to unload the SD checkpoint and free VRAM)
 import modules.sd_models
 
-# Extension root directory
+# Extension root directory; on sys.path so `seedvr2_neo` and the vendored `src` can be imported
 EXTENSION_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-MODEL_DIR = os.path.join(EXTENSION_ROOT, "models", "SeedVR2") 
+if EXTENSION_ROOT not in sys.path:
+    sys.path.insert(0, EXTENSION_ROOT)
 
-# If the default directory does not exist, fall back to the WebUI's own models directory
-if not os.path.exists(MODEL_DIR):
-    MODEL_DIR_FALLBACK = os.path.join(shared.models_path, "SeedVR2")
-    if os.path.exists(MODEL_DIR_FALLBACK):
-        MODEL_DIR = MODEL_DIR_FALLBACK
+from seedvr2_neo.model_discovery import ModelScan, describe_missing_models, find_selection_error, scan_models
+
+
+def scan_seedvr2_models() -> ModelScan:
+    """Rescan on every call: the user may add files or create the folder while the WebUI runs."""
+    return scan_models(shared.models_path, EXTENSION_ROOT)
+
 
 # Custom exception used to stop SeedVR2 cleanly when the user presses Interrupt
 class SeedVR2Interrupted(Exception):
@@ -35,24 +39,18 @@ class Script(scripts.Script):
         return True
 
     def ui(self, is_img2img):
-        # --- Scan for model files ---
-        all_files = []
-        if os.path.exists(MODEL_DIR):
-            all_files = [f for f in os.listdir(MODEL_DIR) if f.endswith(".gguf") or f.endswith(".safetensors")]
-        
-        dit_choices = [f for f in all_files if "vae" not in f.lower()] 
-        vae_choices = [f for f in all_files if "vae" in f.lower()]     
-        
-        if not dit_choices: dit_choices = all_files
-        if not vae_choices: vae_choices = all_files
-
-        default_dit = dit_choices[0] if dit_choices else ""
-        default_vae = next((f for f in vae_choices if "ema_vae_fp16" in f), vae_choices[0] if vae_choices else "")
+        scan = scan_seedvr2_models()
+        missing_note = describe_missing_models(scan)
 
         with gr.Row():
-            dit_model = gr.Dropdown(label="DiT Model", choices=dit_choices, value=default_dit)
-            vae_model = gr.Dropdown(label="VAE Model", choices=vae_choices, value=default_vae)
-        
+            dit_model = gr.Dropdown(label="DiT Model", choices=list(scan.dit_models), value=scan.default_dit)
+            vae_model = gr.Dropdown(label="VAE Model", choices=list(scan.vae_models), value=scan.default_vae)
+            refresh_models = ToolButton(value=refresh_symbol, elem_id=self.elem_id("refresh_models"),
+                                        tooltip="Rescan the SeedVR2 model folder")
+        missing_models_note = gr.Markdown(missing_note, visible=bool(missing_note))
+        refresh_models.click(fn=self._refresh_models, inputs=[dit_model, vae_model],
+                             outputs=[dit_model, vae_model, missing_models_note])
+
         with gr.Row():
             seed = gr.Number(label="Seed (-1 = Random/Follow)", value=-1, precision=0)
             resolution = gr.Slider(label="Upscale Resolution (Shortest Edge)", minimum=512, maximum=3840, step=64, value=1080)
@@ -76,10 +74,26 @@ class Script(scripts.Script):
 
         return [dit_model, vae_model, seed, resolution, input_noise, latent_noise, force_reload, unload_sd, save_original, use_tile_vae, tile_size, tile_overlap, debug_mode]
 
+    @staticmethod
+    def _refresh_models(current_dit, current_vae):
+        """Rescan the folder; keep the current choices if their files are still there."""
+        scan = scan_seedvr2_models()
+        note = describe_missing_models(scan)
+        return (
+            gr.update(choices=list(scan.dit_models), value=scan.keep_or_default_dit(current_dit)),
+            gr.update(choices=list(scan.vae_models), value=scan.keep_or_default_vae(current_vae)),
+            gr.update(value=note, visible=bool(note)),
+        )
+
     def run(self, p, dit_model_name, vae_model_name, seed, resolution, input_noise, latent_noise, force_reload, unload_sd, save_original, use_tile_vae, tile_size, tile_overlap, debug_mode):
-        if EXTENSION_ROOT not in sys.path:
-            sys.path.insert(0, EXTENSION_ROOT)
-        
+        # Checked before the base image is generated, so a bad selection costs no generation time
+        scan = scan_seedvr2_models()
+        selection_error = find_selection_error(scan, dit_model_name, vae_model_name)
+        if selection_error:
+            print(f"❌ [SeedVR2] {selection_error}")
+            return Processed(p, [], p.seed, f"SeedVR2: {selection_error}")
+        print(f"[SeedVR2] Model folder: {scan.folder} | DiT: {dit_model_name} | VAE: {vae_model_name}")
+
         # --- Interruption check, passed to the pipeline as a progress callback ---
         def check_interruption(*args, **kwargs):
             # Only .interrupted is checked; the .stopping check was removed on purpose
@@ -158,7 +172,7 @@ class Script(scripts.Script):
             args.input_noise_scale = float(input_noise)
             args.latent_noise_scale = float(latent_noise)
             
-            args.model_dir = MODEL_DIR
+            args.model_dir = scan.folder
             args.dit_offload_device = "none"
             args.vae_offload_device = "none"
             args.tensor_offload_device = "cpu"

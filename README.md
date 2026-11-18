@@ -19,20 +19,20 @@ port [numz/ComfyUI-SeedVR2_VideoUpscaler](https://github.com/numz/ComfyUI-SeedVR
 
 ## Models
 
-Put the models into **one** of these folders (checked in this order):
-
-1. `extensions/<this extension>/models/SeedVR2/`
-2. `<WebUI root>/models/SeedVR2/`
+Put the models into `<WebUI root>/models/SeedVR2/` (the folder name may be in any letter case; with
+`--model-ref` / `--data-dir` it is `SeedVR2/` inside your models folder). If that folder has no models,
+`extensions/<this extension>/models/SeedVR2/` is used instead. The folder in use is printed in the console on every run;
+when no models are found, the script panel shows the exact path to put them in.
 
 You need:
 
 - a VAE: `ema_vae_fp16.safetensors` (any file with `vae` in its name is listed as a VAE);
 - a DiT model, for example `seedvr2_ema_7b_sharp-Q4_K_M.gguf`, `seedvr2_ema_3b_fp16.safetensors`.
-  Keep `7b` in the file name of 7B models: the model config is chosen by the file name.
+  The file can be renamed freely: 3B or 7B is read from the file itself.
 
 Downloads: [numz/SeedVR2_comfyUI](https://huggingface.co/numz/SeedVR2_comfyUI) and
 [AInVFX/SeedVR2_comfyUI](https://huggingface.co/AInVFX/SeedVR2_comfyUI) on Hugging Face.
-The model list is read when the UI is built — after adding a model, restart the UI.
+After adding a model, press 🔄 next to the model dropdowns — no restart needed.
 
 ## Usage
 
@@ -49,7 +49,12 @@ the checkpoint is reloaded on the next generation.
 
 ## Tests
 
-There are no automated tests yet (see [`docs/03-ROADMAP.md`](docs/03-ROADMAP.md)).
+Tests run outside Forge and need no GPU:
+
+```
+pip install -r requirements-dev.txt
+python -m pytest tests
+```
 
 ## Documentation
 
