@@ -62,13 +62,20 @@ None of its own: the UI lives inside the txt2img / img2img tabs.
 ## Modules
 
 ### scripts/
-- `seedvr2_script.py` — the whole Forge integration: UI controls and the model refresh button, the model check before a
-  run, seed resolution, building the pipeline arguments, cached generation context (`self.runner_cache`), running the four
-  phases, saving the result with `-seedvr2` suffix, interruption via `shared.state.interrupted`.
+- `seedvr2_script.py` — the whole Forge integration: UI controls, the model refresh button and the 7B low-VRAM note,
+  the model check and pipeline import before a run, seed resolution, running the four phases on Forge's device with a
+  fresh generation context, the process-wide `MODEL_LIFECYCLE`, saving the result with `-seedvr2` suffix, interruption
+  via `shared.state.interrupted`.
 
 ### seedvr2_neo/
+No Forge, Gradio or torch imports; tested outside Forge.
 - `model_discovery.py` — `scan_models(models_path, extension_root)` → `ModelScan` (absolute folder, DiT and VAE file
-  names, defaults); the user-facing note for missing models; the reason a selection cannot run. No Forge imports.
+  names, defaults); the user-facing note for missing models; the reason a selection cannot run.
+- `memory_plan.py` — `build_memory_plan(after_run, blocks_to_swap, swap_io_components)` → `MemoryPlan` (cache flag,
+  DiT/VAE offload devices, `block_swap_config()`); `AfterRun` (UI labels); `low_vram_warning(dit_size, total_vram_bytes)`.
+- `loaded_models.py` — `LoadedModelTracker`: which files (path, size, mtime) the cached models came from.
+- `model_lifecycle.py` — `ModelLifecycle`: drops the vendored cache before a run (Force Reload, other files) and after it
+  (Unload, error, interrupt), then releases memory through a function the script passes in.
 
 ### seedvr2_vendor/core/
 - `generation_utils.py` — `setup_generation_context` (devices, dtype), `prepare_runner`, `compute_generation_info`, `load_text_embeddings`.
@@ -80,7 +87,7 @@ None of its own: the UI lives inside the txt2img / img2img tabs.
 
 ### seedvr2_vendor/optimization/
 - `memory_manager.py` — moving models/tensors between devices, `release_model_memory`, cleanup.
-- `blockswap.py` — swapping DiT blocks to CPU (not exposed in the Forge UI).
+- `blockswap.py` — swapping DiT blocks to CPU (BlockSwap controls in the Forge UI).
 - `gguf_ops.py`, `gguf_dequant.py` — quantized layers. `compatibility.py` — optional-package detection (`gguf`, triton, flash/sage attention), bf16 support.
 
 ### seedvr2_vendor/utils/

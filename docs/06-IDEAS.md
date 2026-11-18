@@ -41,6 +41,15 @@ SageAttention / FlashAttention are supported in `seedvr2_vendor/` but fixed to `
 ## Settings in Forge's Settings tab
 Model folder, default unload behaviour and default tile size as Forge options (`shared.opts`) instead of per-run controls (weight 2).
 
+## fp16 compute on GPUs without bf16
+RTX 20xx / GTX 16xx pass the bf16 probe and run the pipeline in emulated bf16 (`07-RISKS.md` §3). fp16 compute may be
+faster there, but needs measuring and a check for overflow artifacts first (weight 2).
+
+## Free only as much SD memory as SeedVR2 needs
+Instead of unloading the whole checkpoint, `backend.memory_management.free_memory(bytes, device)` could unload Forge's
+models just until SeedVR2 fits, sparing the ~2-minute checkpoint reload for some setups. Needs an estimate of SeedVR2's
+peak VRAM per model and resolution (weight 2).
+
 ---
 
 ## Rejected by the owner
