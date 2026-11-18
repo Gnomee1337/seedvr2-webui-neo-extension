@@ -11,8 +11,6 @@ from dataclasses import dataclass
 from enum import Enum
 from typing import Any, Dict, Optional
 
-from seedvr2_vendor.utils.dit_size import DitSize, choose_dit_size
-
 # The vendored pipeline offloads to the CPU by device name; it accepts a string as well as a torch.device.
 CPU_DEVICE = "cpu"
 
@@ -81,7 +79,16 @@ def clamp_blocks_to_swap(value: Any) -> int:
 
 
 def is_7b_checkpoint(dit_model: str, checkpoint_path: str) -> bool:
-    """True for a 7B DiT, judged the same way the pipeline picks its config (header first, then the file name)."""
+    """True for a 7B DiT, judged the same way the pipeline picks its config (header first, then the file name).
+
+    Imported here, not at module level: the script imports this module when Forge loads it, and a missing or shadowed
+    `seedvr2_vendor` must not make the script vanish from the UI (the run reports it instead).
+    """
+    try:
+        from seedvr2_vendor.utils.dit_size import DitSize, choose_dit_size
+    except ImportError as e:
+        print(f"[SeedVR2] Cannot check the DiT size: {e}")
+        return False
     return choose_dit_size(dit_model, checkpoint_path).size is DitSize.B7
 
 

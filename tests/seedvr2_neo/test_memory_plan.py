@@ -1,6 +1,7 @@
 """UI values → offload devices and cache flags, and the 7B low-VRAM note of `seedvr2_neo/memory_plan.py`."""
 import json
 import struct
+import sys
 
 import pytest
 
@@ -29,6 +30,13 @@ def test_3b_checkpoint_is_not_7b_even_with_7b_in_the_name(tmp_path):
     path = write_safetensors_header(tmp_path / "seedvr2_ema_7b_fp16.safetensors", 32)
 
     assert mp.is_7b_checkpoint("seedvr2_ema_7b_fp16.safetensors", path) is False
+
+
+def test_missing_vendored_package_means_no_7b_note(tmp_path, monkeypatch):
+    path = write_safetensors_header(tmp_path / "seedvr2_ema_7b.safetensors", 36)
+    monkeypatch.setitem(sys.modules, "seedvr2_vendor.utils.dit_size", None)  # makes the import raise ImportError
+
+    assert mp.is_7b_checkpoint("seedvr2_ema_7b.safetensors", path) is False
 
 
 def test_unreadable_checkpoint_falls_back_to_the_file_name(tmp_path):

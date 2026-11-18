@@ -72,13 +72,13 @@ Live-checked on an 8 GB GPU without bf16, 16 GB RAM, 1080px output: 3B GGUF Q6_K
   after encode, upscale and decode (`devices.torch_gc()`); whether that stops the paging is to be seen live. (B06)
 - 🟡 R4 (S2×L2) **"Keep in RAM" holds 3–8 GB of system RAM until the next run.** Together with Forge's offloaded SD
   checkpoint a 16 GB system dropped to 0.03 GB free RAM. Default is "Unload SeedVR2"; the option's hint says what it costs.
-- 🟢 R3 (S1×L3) **"Unload SD Checkpoint" (on by default) costs a full checkpoint reload on the next generation** — about
-  2 minutes with a large checkpoint. It is the price of freeing VRAM; the checkbox hint says so. Idea for a partial unload: `06-IDEAS.md`.
 - 🟡 R4 (S2×L2) **GPUs without bf16 (RTX 20xx / GTX 16xx) run the pipeline in emulated bf16.** The bf16 probe in
   `seedvr2_vendor/optimization/compatibility.py` passes on current PyTorch, so DiT and VAE compute in bf16; results are clean.
-  Not measured: how much faster fp16 compute would be on these GPUs. (B06)
-- 🟢 R2 (S2×L1) **No low-VRAM note for 7B fp16 on 12–16 GB GPUs.** The 11 GiB threshold is sized for 7B fp8 (~7.9 GB of
+  Not measured: how much faster fp16 compute would be on these GPUs. Idea: `06-IDEAS.md`.
+- 🟡 R4 (S2×L2) **No low-VRAM note for 7B fp16 on 12–16 GB GPUs.** The 11 GiB threshold is sized for 7B fp8 (~7.9 GB of
   weights); 7B fp16 (~16 GB) does not fit those GPUs either. Close: a threshold from the DiT file size instead of a fixed one.
+- 🟢 R3 (S1×L3) **"Unload SD Checkpoint" (on by default) costs a full checkpoint reload on the next generation** — about
+  2 minutes with a large checkpoint. It is the price of freeing VRAM; the checkbox hint says so. Idea for a partial unload: `06-IDEAS.md`.
 - 🟢 R2 (S2×L1) **Calls with the old argument list** (API payloads saved before the new controls) get the defaults
   for "After run" and BlockSwap: unload, BlockSwap off.
 

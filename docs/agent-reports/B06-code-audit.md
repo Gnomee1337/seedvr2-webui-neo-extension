@@ -110,3 +110,45 @@ the unused value.
 - `find_model_file` prefers `os.path.join(scan.folder, name)` (local patch), the same path the tracker stats.
 - `test_model_lifecycle.py` and `test_loaded_models.py` would fail on the obvious mutations (keep on failure, double
   release, missing `forget`, name-only identity).
+
+---
+
+## Re-check after `3afc913` (`git diff 54af56e..HEAD`)
+
+Tests: `328 passed, 1 skipped, 2 xfailed`. Live probe: `low_vram_warning(is_7b_checkpoint("seedvr2_ema_7b_fp8_e4m3fn.safetensors", "missing"), 8 GiB)`
+returns the note; importing `seedvr2_neo.memory_plan` does not load `torch`.
+
+| # | Finding | Status |
+|---|---|---|
+| 1 | BLOCKER: 7B note never shown ("7B" vs "7b") | **Fixed.** `is_7b_checkpoint` compares `choose_dit_size(...).size is DitSize.B7` (`seedvr2_neo/memory_plan.py`); `low_vram_warning` takes a bool. Docstring corrected. |
+| 2 | IMPORTANT: tests used an invented `"7b"` value | **Fixed.** `test_memory_plan.py` builds real safetensors headers (36 → 7B, 32 → not 7B despite "7b" in the name) and checks the name fallback; a comparison against the wrong value now fails a test. |
+| 3 | MINOR: identity read after the run | **Fixed.** `prepare_run` reads identities into `_run_files`; `finish_run` remembers those. `test_file_replaced_during_the_run_is_not_trusted_next_time` fails on the old behaviour (re-read at the end). |
+| 4 | MINOR: keep/unload rule duplicated in the script | **Fixed.** `finish_run` returns whether models were kept; the script prints from it. |
+| 5 | MINOR: 7B fp16 on 12–16 GB GPUs gets no note | **Moved to `07-RISKS.md`** as 🟢 R2 (S2×L1). Note: the audit rated it L2 (12–16 GB GPUs with a 7B fp16 file are a common enough setup); the rating is the main chat's call. |
+| 6 | MINOR: risk text missed the startup header read | **Fixed** in `07-RISKS.md` (default DiT at UI build + every selection; startup hang named). |
+| 7 | MINOR: `_upscale_tensor` 16 params, unused `gen_info` | **Partly fixed.** `UpscaleRequest` dataclass, 6 params, `_generation_info`. Length still ~64 lines (`scripts/seedvr2_script.py:333-397`): setup and phase sequence not split — stays MINOR. |
+
+### Checked in the fixes (no new defect found)
+- `_run_files` per-run state: set in `prepare_run`, consumed and reset in `finish_run`. A `finish_run` without `prepare_run`
+  keeps nothing (tested). If `prepare_run` raises after setting it, the next `prepare_run` overwrites it, so no stale
+  identity is ever remembered. Forge serialises generations (UI and API share the queue lock), so one pending slot
+  is enough; the UI-only `_update_vram_warning` handler does not touch the lifecycle.
+- A missing file at `prepare_run` gives identity `None`; `remember(None, …)` makes `is_cache_valid_for` return False — the cache
+  is never trusted for an unreadable file.
+- `describe_vram_warning` lost its `try/except`: safe, `choose_dit_size` catches every `Exception` from the header read
+  (including `MemoryError`) and falls back to the file name. The hang case is the existing GGUF risk, now documented.
+
+### New finding
+#### 8. Module-level vendor import undoes part of the "UI still loads" guarantee — 🟢 R3 (S3×L1), MINOR
+`seedvr2_neo/memory_plan.py:14` (`from seedvr2_vendor.utils.dit_size import ...`), imported at
+`scripts/seedvr2_script.py:29`; contradicts the docstring of `import_pipeline` (`scripts/seedvr2_script.py:55-57`: "not at
+module level, so the UI still loads and shows the error").
+
+Today it is harmless: `seedvr2_vendor/__init__.py` and `utils/__init__.py` are empty and `dit_size.py` is stdlib-only
+(`gguf` lazily). But the script module now fails to import if `seedvr2_vendor` cannot be imported. Scenario: a
+damaged install without `seedvr2_vendor/` (or a foreign package named `seedvr2_vendor` imported first — the
+existing name-collision risk in `07-RISKS.md`) → `ImportError` while Forge loads `scripts/seedvr2_script.py` → the script
+disappears from the dropdown with only a startup traceback, instead of the `Error: …` result `import_pipeline` was built
+to give. It also makes `seedvr2_neo` depend on `seedvr2_vendor`, while `02-ARCHITECTURE.md` presents `seedvr2_neo` as
+standalone helpers. Fix: import `choose_dit_size` inside `is_7b_checkpoint` (or have the script pass the size in), or
+reword the `import_pipeline` docstring and the architecture note to state the new dependency.
