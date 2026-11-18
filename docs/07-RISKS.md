@@ -39,8 +39,8 @@ Every risk and every bug found gets a rating **R = S × L** and an icon based on
   file declaring 10^6 items took ~650 MB and 23 s; a value near 2^63 hangs the WebUI. Both `seedvr2_vendor/utils/dit_size.py` and
   the loader (`seedvr2_vendor/core/model_loader.py`) use it. Truncated downloads do not trigger it (the header stays intact).
   Repro: `test_gguf_with_absurd_array_length_does_not_grow_memory` (strict xfail). Close: bounded own GGUF header parser.
-- 🟢 R2 (S2×L1) **Cached models are matched by file name only.** The folder is re-chosen on every run; a same-named file
-  in the other folder, or a file replaced in place, keeps the old weights and config. Force Reload does not clear it. (B06)
+  The header is also read for the 7B low-VRAM note: for the default DiT when Forge builds the UI, and on every DiT
+  selection — so such a file as the default DiT hangs Forge at startup.
 - 🟢 R2 (S2×L1) **A VAE without `vae` in its name is listed as a DiT**; the note then says no VAE was found. Rename the file.
 - 🟢 R2 (S2×L1) **`find_model_file` falls back to the working-directory scan if the chosen file vanished** between the
   scan and the load (`seedvr2_vendor/utils/constants.py`), and raises `NotADirectoryError` if `./models/SEEDVR2` there is a file.
@@ -58,31 +58,51 @@ Every risk and every bug found gets a rating **R = S × L** and an icon based on
   (`external-apis/forge-neo.md`); if Neo drops or moves it, `.gguf` models stop loading. Close: a test that imports it. (B09)
 
 ## 3. VRAM and model lifecycle
-Live-checked on an 8 GB GPU without bf16, 16 GB RAM, 1080px output: 3B GGUF Q6_K — DiT step 7 s; 3B fp8 — 10 s;
-7B fp8 — 780 s. All three gave clean images. After the run the GPU drops back to about 1 GB used.
+Live-checked on an 8 GB GPU without bf16, 16 GB RAM, 1080px output, VAE tile 512: 3B GGUF Q6_K — DiT step 7 s;
+3B fp8 — 5–7 s; 7B fp8 with BlockSwap 16 — 34–42 s (780 s without BlockSwap). All gave clean images; after a run with
+"Unload" the GPU drops back to about 0.6 GB used. Between phases the reserved VRAM goes back to ~0.5 GB.
 
-- 🟠 R9 (S3×L3) **7B is practically unusable on 8 GB: no low-VRAM path.** 7B fp8 weights take 7.9 GB, the rest spills
-  into shared memory and the DiT step is ~80× slower than 3B. BlockSwap, DiT/VAE offload exist in `seedvr2_vendor/` but are fixed
-  to "off" in `run()`; the UI offers 7B with no hint. Close: BlockSwap/offload in the UI, a warning for 7B on small GPUs. (B06)
-- 🟠 R9 (S3×L3) **"Force Reload" does not reload models.** It clears only `self.runner_cache` (the context);
-  `GlobalModelCache` keeps the DiT/VAE, so a broken or swapped file with the same name is reused. (B06)
-- 🟡 R6 (S2×L3) **Reserved VRAM grows between phases and spills into shared memory.** PyTorch's allocator keeps freed
-  blocks reserved (4.7 GB after VAE encode with 0.5 GB in use, 8.8–9 GB at the end), the upstream logs "VRAM overflow:
-  0.8–1 GB paged to system RAM". Seen: VAE decode of 1962×1080 took 470 s against 43 s for 1080×1080 in the same session;
-  1080×1080 VAE decode took 38 s in the first run and 117 s in the second (4.8 GB reserved before decode, 2.9 GB paged).
-  Close: release the cache between phases, check with a live run. (B06)
-- 🟡 R6 (S2×L3) **SeedVR2 models stay in system RAM after the run.** With no offload device the cleanup moves DiT and VAE
-  to CPU for caching (`seedvr2_vendor/optimization/memory_manager.py`, cleanup of DiT/VAE), so 3–8 GB stay in RAM. Together with
-  Forge's offloaded SD checkpoint a 16 GB system dropped to 0.03 GB free RAM. Close: "unload SeedVR2 after run". (B06)
-- 🟡 R6 (S2×L3) **"Unload SD Checkpoint" (on by default) costs a full checkpoint reload on every run** — about 2 minutes
-  with a large checkpoint on the next generation. It is the price of freeing VRAM; the UI does not say so. (B06)
+- 🟡 R6 (S2×L3) **With `--cuda-malloc` (cudaMallocAsync) VAE decoding spills into shared memory.** At 1080px with tile
+  512 the decode reserves 8.7 GB for a 5.2 GB peak, pages 0.7–2.9 GB and takes 25–137 s; without the flag 6.7 GB
+  reserved, no spill, 12.4 s. The flag is opt-in in Forge but common on 8 GB setups; it makes the 7B DiT step faster
+  with few BlockSwap blocks (8 blocks: 21 s vs 122 s). README gives the trade-off. Close: release the cache inside the
+  VAE decode between tiles, or measure `expandable_segments`.
+- 🟡 R4 (S2×L2) **7B with too few BlockSwap blocks falls off a cliff.** 7B fp8 on 8 GB: 8 blocks fit only with
+  `--cuda-malloc` (0 GB free), 4 blocks spill (297 s). Larger outputs need more blocks. The note recommends 16.
+- 🟡 R4 (S2×L2) **VAE tile 1024 (the default) spills on 8 GB GPUs at 1080px.** Encode peak 6.9 GB, 1.3 GB paged
+  (16 s vs 5.7 s with tile 512); decode 2.9 GB paged. README recommends 512; the default is unchanged.
+- 🟡 R4 (S2×L2) **"Keep in RAM" holds the models in system RAM until the next run** (3–4 GB for 3B fp8, ~16 GB for
+  7B fp16). Together with Forge's offloaded SD checkpoint a 16 GB system dropped to 0.03–0.7 GB free RAM. Default is
+  "Unload SeedVR2"; the option's hint and the README say what it costs. An interrupt before the upscale starts (during
+  the base image) leaves the previous run's kept models in RAM until the next run.
 - 🟡 R4 (S2×L2) **GPUs without bf16 (RTX 20xx / GTX 16xx) run the pipeline in emulated bf16.** The bf16 probe in
   `seedvr2_vendor/optimization/compatibility.py` passes on current PyTorch, so DiT and VAE compute in bf16; results are clean.
-  Not measured: how much faster fp16 compute would be on these GPUs. (B06)
-- 🟡 R4 (S2×L2) **Cached context survives exceptions.** After an OOM mid-run, `self.runner_cache['ctx']` keeps partial
-  state; the `finally` block deletes key names that do not exist (`images`, `encoded_latents`, `upscaled_latents`). (B06)
-- 🟡 R4 (S2×L2) **Device hard-coded to `cuda:0`.** Ignores Forge's `--device-id` and non-CUDA backends; Forge's own device
-  is `modules.devices.device`. (B06)
+  Not measured: how much faster fp16 compute would be on these GPUs. Idea: `06-IDEAS.md`.
+- 🟡 R4 (S2×L2) **The 7B low-VRAM note judges the model family, not its size.** The 11 GiB threshold is sized for 7B fp8
+  (~7.9 GB of weights): 7B fp16 (~16 GB) on 12–16 GB GPUs gets no note, a small 7B GGUF (Q4) on 8 GB gets one it may not
+  need. The note is computed for the default DiT when the UI is built; a DiT restored from `ui-config.json` may show
+  the other model's note until the selection changes (not checked in Forge). Close: threshold from the DiT file size.
+- 🟢 R3 (S3×L1) **An unloaded model's VRAM is freed only when nothing references it.** `release_model_memory` does not
+  free CUDA storage (`external-apis/seedvr2-upstream.md`, local patches); the memory returns when the runner drops the
+  model and `gc.collect()` + empty-cache run (live: the DiT's 3.2 GB stays allocated right after Phase 2 and is gone
+  before Phase 3). A stray reference would keep the VRAM held with no warning.
+- 🟢 R3 (S1×L3) **"Unload SD Checkpoint" (on by default) costs a full checkpoint reload on the next generation** — about
+  2 minutes with a large checkpoint. It is the price of freeing VRAM; the checkbox hint says so. Idea for a partial unload: `06-IDEAS.md`.
+- 🟢 R2 (S1×L2) **"Keep in RAM" reloads both models when only one changes.** Changing only the VAE drops the cached DiT
+  too (a 7B reloads from disk). After Forge's "Reload UI" the kept models stay in RAM untracked until the next run drops
+  them. Switching Keep in RAM → Unload with the same files also reads them from disk once (the vendored cache drops its
+  entries when caching is off).
+- 🟢 R2 (S2×L1) **"Keep in RAM" + an error or interrupt in Phase 2 copies the DiT to RAM just to drop it.** The phase's
+  `finally` caches it (`cache_model=True`), then the run is failed and the models are unloaded: a RAM spike of the DiT's
+  size and a few seconds after Interrupt. Result correct (live). Avoiding it needs a patch of the vendored `finally`.
+- 🟢 R2 (S2×L1) **Not run live:** Keep in RAM with BlockSwap on; Keep in RAM with the block count changed between runs
+  (upstream's `_handle_blockswap_change`); interrupt in Unload mode.
+- 🟢 R1 (S1×L1) **Edge cases of the B06 helpers** (stress tests in `tests/seedvr2_neo/*_stress.py`): a same-size file
+  replaced within one mtime step (100 ns NTFS, 2 s FAT32) is trusted; a symlinked model path counts as another file
+  (one extra reload); `"8.0"` as a string from the API means BlockSwap off; an error from the memory release in the
+  script's `finally` replaces the run's result with a raw exception.
+- 🟢 R2 (S2×L1) **Calls with the old argument list** (API payloads saved before the new controls) get the defaults
+  for "After run" and BlockSwap: unload, BlockSwap off.
 
 ## 4. Generation flow and results
 - 🟠 R8 (S2×L4) **Only the first image is upscaled.** txt2img with batch size / count > 1: `processed_base.images[0]` —
@@ -103,7 +123,10 @@ Live-checked on an 8 GB GPU without bf16, 16 GB RAM, 1080px output: 3B GGUF Q6_K
   Close: set `ctx['interrupt_fn']` to a Forge check and update `shared.state.job*` from `progress_callback`. (B08)
 
 ## 5. Code hygiene
-- 🟢 R3 (S1×L3) **No CI; `scripts/seedvr2_script.py` has no tests** (needs Forge stubs). (B09)
+- 🟢 R3 (S1×L3) **No CI; `scripts/seedvr2_script.py` has no tests** (needs Forge stubs). Also untested: the
+  pipeline import before the base image (checked by code order and a stubbed import check only), and our calls against
+  the real `GlobalModelCache` / `validate_blockswap_config` (tests use stand-ins), so an upstream sync can break them
+  with all tests green. (B09)
 - 🟢 R3 (S1×L3) **Leftover `src/` folder after an update.** Forge's update (`reset --hard`) removes the tracked files but
   keeps untracked `src/**/__pycache__`. Harmless: nothing imports `src`, and a folder without `__init__.py` loses to
   another extension's real `src` package. Users may delete it by hand.
@@ -112,17 +135,12 @@ Live-checked on an 8 GB GPU without bf16, 16 GB RAM, 1080px output: 3B GGUF Q6_K
 - 🟢 R2 (S1×L2) **Same Script title as the original SeedVR2 Forge extension** ("SeedVR2 Native Upscaler (24G)"): with both
   installed the entries look alike, and `run()` matches scripts by title when it removes itself before txt2img. README
   asks to install only one; the title changes in B08.
-- 🟢 R2 (S1×L2) **A pipeline import error shows up only after the base image and the SD unload** (`run()` imports the
-  pipeline late). It is printed to the console and returned as `Error: ...`. Moving the import before the work: B06.
 - 🟢 R1 (S1×L1) **Our top-level package names `seedvr2_neo` / `seedvr2_vendor` can still collide** with a future extension
   that uses the same names; no check exists. Unlikely with these names.
 
 ## Top risks
-1. 🟠 R9 7B practically unusable on 8 GB, no low-VRAM path — section 3.
-2. 🟠 R9 "Force Reload" does not reload models — section 3.
-3. 🟠 R8 Only the first image (or the grid) is upscaled — section 4.
-4. 🟡 R6 Reserved VRAM grows and spills into shared memory — section 3.
-5. 🟡 R6 SeedVR2 models stay in system RAM after the run — section 3.
-6. 🟡 R6 SD checkpoint reload on every run — section 3.
-7. 🟡 R6 Result infotext lost — section 4.
-8. 🟡 R4 Corrupt GGUF header can hang the WebUI — section 1.
+1. 🟠 R8 Only the first image (or the grid) is upscaled — section 4.
+2. 🟡 R6 VAE decode spills with `--cuda-malloc` — section 3.
+3. 🟡 R6 Result infotext lost — section 4.
+4. 🟡 R4 Corrupt GGUF header can hang the WebUI — section 1.
+5. 🟡 R4 7B with too few BlockSwap blocks; VAE tile 1024 spills on 8 GB — section 3.

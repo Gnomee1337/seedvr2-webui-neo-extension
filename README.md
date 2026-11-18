@@ -52,6 +52,24 @@ Usually you only need to change **Upscale Resolution (Shortest Edge)**.
 The result is saved with the `-seedvr2` suffix. **Unload SD Checkpoint** (on by default) frees VRAM for SeedVR2;
 the checkpoint is reloaded on the next generation.
 
+**After run:** *Unload SeedVR2* (default) frees the SeedVR2 models from VRAM and RAM when the upscale ends;
+*Keep in RAM* keeps them for a faster next run at the cost of system RAM about the size of the two model files
+(3–4 GB for 3B fp8, ~16 GB for 7B fp16). An error or an interrupt during the upscale unloads them in either mode.
+**Force Reload** reads the model files from disk again; it matters only with *Keep in RAM*, since *Unload* reads
+them on every run anyway.
+
+### GPUs with 8–11 GB
+
+- **7B models need BlockSwap.** Without it they spill into shared memory and run many times slower. Set
+  **BlockSwap: DiT blocks kept in RAM** to **16** (the script shows this hint when a 7B is selected). Measured with
+  7B fp8 at 1080px on an 8 GB GPU: the DiT step went from ~13 minutes to 35–42 seconds. Fewer blocks are faster only
+  while everything still fits; more blocks use less VRAM and run slower. 3B models need no BlockSwap.
+- **Tile Size 512** (Advanced Settings) instead of 1024 keeps VAE encoding and decoding inside VRAM; with 1024 a
+  1080px image overflowed into shared memory.
+- **`--cuda-malloc`** in Forge's launch options changes the speed: in the same test, VAE decoding took 12 s without
+  it and 25–137 s with it (it reserves more VRAM than the card has), while the 7B DiT step with 8 BlockSwap blocks was
+  faster with it (21 s vs 122 s). With 16 blocks both settings are close. If VAE decoding is slow, try launching without it.
+
 <img width="1660" height="694" alt="Extension UI" src="https://github.com/user-attachments/assets/777c34e7-aca6-4e51-9994-f02f817311ea" />
 
 ## Tests

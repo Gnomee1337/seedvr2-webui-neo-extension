@@ -101,9 +101,26 @@ Why (*reconstructed from code*): the original author removed the `stopping_gener
 Why (*reconstructed from code*): SD and a 7B SeedVR2 do not fit together into 24 GB. Forge reloads the checkpoint on the
 next generation.
 
-### DiT and VAE stay cached on the GPU between runs
-Why (*reconstructed from code*): repeated upscales skip model loading. Pitfall: the VRAM is not returned to Forge
-(`07-RISKS.md` §3) — to be revisited in B06.
+### SeedVR2 is unloaded after every run by default; "Keep in RAM" is opt-in
+Why: the owner's choice. Forge has no hook to ask an extension for its memory back, so whatever SeedVR2 keeps shrinks
+what SD can load; with a 16 GB RAM system the cached models (3–4 GB for 3B fp8, up to ~16 GB for 7B fp16) left
+almost no free RAM. Keeping models is for repeated
+upscales and must be chosen.
 
-### Fixed pipeline settings: batch 1, LAB color correction, `sdpa`, no `torch.compile`, no BlockSwap
-Why (*reconstructed from code*): the simplest configuration that works on 24 GB without optional packages.
+### Models are dropped after an error or an interrupt, even with "Keep in RAM"
+Why: a failed phase can leave a model on the GPU or half-configured; reusing it is a worse bug than one reload from disk.
+The generation context is built fresh every run for the same reason (and it is cheap).
+
+### The cached models are trusted only for the same files (path, size, modification time)
+Why: the vendored cache matches by file name; a same-named file in the other model folder or a replaced file would
+reuse old weights. Our check lives in `seedvr2_neo/`, the vendored cache stays unpatched.
+
+### BlockSwap is a manual slider with a note for 7B on small GPUs, not an automatic setting
+Why: the owner's choice. The right block count depends on the GPU, the model, the resolution and even the PyTorch
+allocator (7B fp8 at 1080p on 8 GB: 8 blocks take 21 s with `--cuda-malloc` and 122 s without); a wrong automatic
+value either wastes speed or still overflows. The note recommends 16 blocks, the count measured to fit with both
+allocators (34–42 s). BlockSwap on also moves the VAE to RAM during the DiT step: when VRAM is short, the idle VAE
+should not hold it. The note's threshold (11 GiB) is the 7B fp8 weights (~7.9 GB) plus activations at 1080p.
+
+### Fixed pipeline settings: batch 1, LAB color correction, `sdpa`, no `torch.compile`
+Why (*reconstructed from code*): the simplest configuration that works without optional packages.

@@ -49,6 +49,55 @@ Source: `modules/processing.py`.
 - `modules.devices.torch_gc()` → `memory_management.soft_empty_cache()`. Source: `modules/devices.py`.
 - `backend.memory_management.free_memory(memory_required, device, keep_loaded=[])`, `unload_all_models()`,
   `get_torch_device()`. Source: `backend/memory_management.py`.
+- Facts below: `neo` branch, `backend/memory_management.py` (file credits ComfyUI), read via raw GitHub on the day the `neo`
+  head was `89e2e09`; the page summariser relayed the code, bodies were not read line by line.
+- **Device choice:** `get_torch_device() -> torch.device`: CUDA → `torch.device(torch.cuda.current_device())` (index of PyTorch's
+  current device, no flag read in this file); XPU → `torch.device("xpu", torch.xpu.current_device())`; also CPU and MPS branches.
+  `modules.devices.device: torch.device = memory_management.get_torch_device()`, a module-level variable (`modules/devices.py`).
+  The GPU flag is applied earlier, in `initialize_forge()` (`modules_forge/initialization.py`): before `import torch`,
+  `if args.gpu_device_id is not None:` sets `os.environ["CUDA_VISIBLE_DEVICES"] = str(args.gpu_device_id)`. `args` comes from
+  `backend/args.py`: `--gpu-device-id` (int, default `None`, "Set the id of device to use (all other devices will not be
+  visible)"). With the flag, the chosen GPU is the only visible one, i.e. index 0 inside the process. So an extension should use
+  `memory_management.get_torch_device()` or `modules.devices.device`, not a hard-coded `cuda:0`.
+- **Memory numbers (bytes):** `get_total_memory(dev=None, torch_total_too=False)`; `get_free_memory(dev=None, torch_free_too=False)`
+  returning an int, or `(mem_free_total, mem_free_torch)` with `torch_free_too`. CUDA branch: `stats = torch.cuda.memory_stats(dev)`,
+  `mem_free_cuda, _ = torch.cuda.mem_get_info(dev)`, `mem_free_torch = reserved - active`,
+  `mem_free_total = mem_free_cuda + mem_free_torch`. So free memory **includes** the torch allocator's reserved-but-unused blocks.
+  Units: bytes (all values are raw torch byte counts).
+- **Memory held by foreign torch models:** the driver-side free value comes from `mem_get_info`, so VRAM held by an extension's
+  tensors is already missing from it. Only with `args.pynvml` and a successful `pynvml.nvmlInit()` (`PYNVML_IS_AVAILABLE`),
+  `get_free_memory` additionally subtracts `nvml_mem.used - torch_reserved` (other processes); that handle is
+  `nvmlDeviceGetHandleByIndex(0)`, hard-coded.
+- **`soft_empty_cache(force=False)`:** on CUDA calls `torch.cuda.synchronize()`, `torch.cuda.empty_cache()`,
+  `torch.cuda.ipc_collect()` unconditionally; `force` is not used. MPS and XPU have their own branches (synchronize + empty cache),
+  CPU does nothing; it ends by setting the global `signal_empty_cache = False`.
+- **`free_memory(memory_required, device, keep_loaded=[])`:** synchronizes, collects dead models, unloads loaded models on `device`
+  (not in `keep_loaded`) until `memory_required` fits (with `--disable-smart-memory` it unloads candidates without checking free
+  memory), calls `soft_empty_cache()` if anything was unloaded (or if torch-reserved is above 25% of free memory outside
+  HIGH_VRAM), returns the list of unloaded models. It sees only models registered in `current_loaded_models`, never foreign tensors.
+- **`unload_all_models()`** = `free_memory(1e30, get_torch_device())`: every Forge-managed model on the device goes through
+  `model_unload` → `self.model.detach(...)`. Where the weights go (CPU RAM or dropped) is decided in `backend/patcher/base` — not read.
+  `unet_offload_device()` returns CPU unless HIGH_VRAM.
+- **Reserve:** `--reserve-vram GB` (float, default `None`); otherwise `EXTRA_RESERVED_VRAM` defaults to about 400 MB (600 MB on
+  Windows, +100 MB on Windows GPUs above 15 GB); `minimum_inference_memory()` = 0.8 GB + that reserve. Source: same file.
+- **Allocator config is opt-in:** `--cuda-malloc` (default `False`) → `try_cuda_malloc()` (`modules_forge/cuda_malloc.py`) sets
+  `PYTORCH_CUDA_ALLOC_CONF=backend:cudaMallocAsync` (appended with a comma to an existing value) unless `nvidia-smi -L` lists a
+  blacklisted old GPU; `--expandable-segments` (default `False`) → `try_expandable_segments()` sets
+  `PYTORCH_ALLOC_CONF=expandable_segments:True`. Both are called from `initialize_forge()` before `import torch`.
+  Nothing sets either by default, so the default allocator is PyTorch's native caching allocator (unless the user's
+  environment sets it). Other flags: `--cuda-stream` (int, optional value, const 2), `--pin-shared-memory`,
+  `--disable-smart-memory`, `--cpu`. Source: `backend/args.py`, `modules_forge/initialization.py`.
+- **`torch.cuda.empty_cache()`:** PyTorch docs: "releases all unused cached memory from PyTorch"; it does not free tensor-occupied
+  memory. Source: <https://docs.pytorch.org/docs/2.15/notes/cuda.html> (Memory management) and
+  `torch.cuda.memory.empty_cache` page. The docs do not say how it behaves under `backend:cudaMallocAsync`; they only say some
+  memory stats are "specific to backend:native" and not meaningful with `cudaMallocAsync`.
+- **Callbacks:** `modules/script_callbacks.py` has 21 `on_*` registrars (names): `on_app_started`, `on_before_reload`,
+  `on_model_loaded`, `on_ui_tabs`, `on_ui_train_tabs`, `on_ui_settings`, `on_before_image_saved`, `on_image_saved`,
+  `on_extra_noise`, `on_cfg_denoiser`, `on_cfg_denoised`, `on_cfg_after_cfg`, `on_before_component`, `on_after_component`,
+  `on_image_grid`, `on_infotext_pasted`, `on_script_unloaded`, `on_before_ui`, `on_list_optimizers`, `on_list_unets`,
+  `on_before_token_counter`. Model-related: `on_model_loaded` only (fired when the SD model is created); there is no
+  "model about to load/unload" hook and no registry for extensions to release VRAM on request in `memory_management.py`
+  (only a `weakref.finalize` that cleans up Forge's own patched models).
 
 ## State (interrupt and progress)
 `shared.state.interrupted` (Interrupt button), `shared.state.stopping_generation` (Stop generating), both reset at job start;
@@ -110,5 +159,13 @@ of a local `neo` checkout finds nothing: Neo neither uses nor reserves such a fo
   (`check_dropdown`), so stale model names left by older versions do not break the dropdowns. Source: `modules/ui_loadsave.py`.
 
 ## Not verified
+- The launch flag name: `backend/args.py` defines `--gpu-device-id`, while a read of `modules/cmd_args.py` showed `--device-id`
+  (str); which one Neo's launcher actually accepts, and whether both exist, was not settled.
+- Where `unload_all_models()` puts the weights (CPU RAM or dropped): `backend/patcher/base` (`detach`, `partially_unload`) not read.
+- Behaviour of `torch.cuda.empty_cache()` and `memory_reserved()` under `cudaMallocAsync`: PyTorch docs are silent; check with
+  a live run (`PYTORCH_CUDA_ALLOC_CONF=backend:cudaMallocAsync` via `--cuda-malloc`: allocate, free, `empty_cache()`, compare
+  `nvidia-smi` with `torch.cuda.memory_reserved()`).
+- Whether any `modules/` code (not `script_callbacks`) lets an extension ask Forge to release memory before loading the SD
+  model: none found in `memory_management.py`; a full search of the tree was not done.
 - Whether `shared.state.skipped` still exists in Neo (used by another extension's interrupt check).
 - Behaviour of the "Extras" postprocessing API (`scripts_postprocessing.ScriptPostprocessing`) in Neo — needed for the Extras idea.

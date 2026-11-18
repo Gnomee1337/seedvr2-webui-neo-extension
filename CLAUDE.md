@@ -22,7 +22,7 @@ Then wait for a command.
   no models, no `__pycache__`.
 
 - **Structure:** `scripts/seedvr2_script.py` — the only Forge entry point (the Script class, UI and the
-  txt2img/img2img flow). `seedvr2_neo/` — our helpers without Forge imports (model discovery).
+  txt2img/img2img flow). `seedvr2_neo/` — our helpers without Forge imports (model discovery, memory plan, model lifecycle).
   `tests/` — pytest (`python -m pytest tests`). `seedvr2_vendor/` — the vendored SeedVR2 pipeline (port of ComfyUI-SeedVR2_VideoUpscaler v2.5.24).
   `configs_3b/`, `configs_7b/` — model configs; `pos_emb.pt`, `neg_emb.pt` — precomputed text embeddings;
   `install.py` — dependencies installed by Forge at launch. Code paths in the docs are relative to the repository root.
