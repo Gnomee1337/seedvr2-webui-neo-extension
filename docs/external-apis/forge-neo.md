@@ -48,6 +48,61 @@ Source: `modules/processing.py`.
 `shared.state.interrupted` (Interrupt button), `shared.state.stopping_generation` (Stop generating), both reset at job start;
 `state.job`, `state.job_no`, `state.job_count` drive the progress text. Source: `modules/shared_state.py`.
 
+## Paths and working directory
+Base URL for sources: `https://raw.githubusercontent.com/Haoming02/sd-webui-forge-classic/neo/`.
+- **`models_path`** is defined in `modules/paths_internal.py` as
+  `models_path = cmd_opts_pre.model_ref or os.path.join(data_path, "models")`, with `data_path = cmd_opts_pre.data_dir`
+  (defaults to the WebUI root). `modules/paths.py` re-exports it (`from modules.paths_internal import models_path, script_path, data_path, ...`).
+  Both `modules.paths.models_path` and `modules.paths_internal.models_path` work.
+  Source: `modules/paths_internal.py`, `modules/paths.py` (read via raw GitHub; the line was relayed by the page summariser, not read in full).
+- **Override flag: `--model-ref`** ("Points to a central `models` folder that contains all your models"); there is **no `--models-dir`**
+  in `modules/cmd_args.py`. Source: `README.md` (Commandline section, "by. Neo"). A `--data-dir` also moves `models`.
+  So `models_path` may point outside the WebUI root; a hard-coded `./models/...` is wrong in that case.
+- **Absolute or not:** `models_path` is absolute only when `data_dir` / `--model-ref` are absolute; the code shown does not
+  call `abspath`. `--data-dir` and `--model-ref` are declared in `modules/paths_internal.py` itself;
+  `--data-dir` defaults to `os.path.dirname(modules_path)`, i.e. the WebUI root, so by default `models_path` is
+  `<WebUI root>/models` (checked in a local `neo` checkout).
+- **Working directory:** `webui.bat` and `webui.sh` do not `cd`/`pushd`; they run `launch.py` relative to the caller's
+  directory (`%PYTHON% launch.py %*`, `"$PYTHON" launch.py "$@"`). `modules/launch_utils.py` has no `os.chdir` and anchors
+  paths on `script_path`. So `os.getcwd()` equals the WebUI root only when the user starts the launcher from there
+  (double-clicking `webui-user.bat` normally does; a shortcut or a call from elsewhere does not). Do not rely on cwd; use `models_path`.
+  `modules/paths_internal.py` also exposes `cwd = os.getcwd()` captured at import. `launch.py` has no `os.chdir` either
+  (local `neo` checkout).
+
+## UI helpers (refresh button)
+- `modules.ui_components.ToolButton` exists: `class ToolButton(gr.Button, FormComponent)`, adds CSS class `"tool"`. Source: `modules/ui_components.py`.
+- `modules.ui_common.refresh_symbol = "\U0001f504"` and
+  `create_refresh_button(refresh_component, refresh_method, refreshed_args, elem_id)` returning the `ToolButton`. Source: `modules/ui_common.py`.
+  Behaviour: `refresh_component` is one component or a list; click runs `refresh_method()` first, then
+  `args = refreshed_args() if callable(refreshed_args) else refreshed_args`, sets each key as an attribute on every component
+  (`setattr(comp, k, v)`) and returns `gr.update(**args)` (a list of them for several components). So
+  `refreshed_args=lambda: {"choices": [...]}` works. The tooltip is `"<label>: refresh"` using the component's `label`.
+  `elem_id` is required (positional). Source: `modules/ui_common.py` (signature and `refresh` body confirmed in two reads).
+
+## Gradio
+Neo's default install pin is `gradio==4.40.0 gradio_rangeslider==0.0.8` (overridable by env `GRADIO_PACKAGE`), in
+`prepare_environment()` of `modules/launch_utils.py`; it is not in `requirements.txt`. The README says Neo continues Forge built on
+Gradio `4.40.0`. Gradio 4: an event handler may return `gr.update(choices=..., value=...)` for a Dropdown. Source: `modules/launch_utils.py`, `README.md`.
+
+## Built-in SeedVR2
+`README.md` of the `neo` branch does not mention SeedVR in any casing, and a web search found no built-in SeedVR2 support or
+`models/SeedVR2` folder in Neo. A case-insensitive search for "seedvr" over `modules/`, `modules_forge/` and `backend/`
+of a local `neo` checkout finds nothing: Neo neither uses nor reserves such a folder.
+
+## Script loading, results and saved UI values
+- **`sys.path`:** `load_scripts` prepends every extension root (`ScriptFile.basedir`) to `sys.path` for good, and while
+  executing each script puts its root first on a temporary list that is replaced by the saved one afterwards. So a
+  script's own `sys.path` edits at import time are discarded, and at run time the extension root is on the path but not
+  necessarily first — a top-level package name shared by two extensions resolves to whichever is imported first.
+  Source: `modules/scripts.py`, `load_scripts`.
+- **Empty `Processed`:** `Processed(p, images_list, seed, info, ..., infotexts=None, ...)`. Normal txt2img shows
+  `processed.info`; only the gallery ✨ (hires upscale) handler reads `processed.infotexts[0]` and splices
+  `processed.images` / `processed.infotexts` into the gallery in place of the selected image. So an empty result needs
+  `infotexts=[message]` to avoid an `IndexError` there, at the cost of one infotext more than images. Source:
+  `modules/processing.py` (`class Processed`), `modules/txt2img.py` (hires button handler).
+- **Saved UI defaults (`ui-config.json`):** a saved dropdown value that is not among the current choices is ignored
+  (`check_dropdown`), so stale model names left by older versions do not break the dropdowns. Source: `modules/ui_loadsave.py`.
+
 ## Not verified
 - Whether `shared.state.skipped` still exists in Neo (used by another extension's interrupt check).
 - Behaviour of the "Extras" postprocessing API (`scripts_postprocessing.ScriptPostprocessing`) in Neo — needed for the Extras idea.

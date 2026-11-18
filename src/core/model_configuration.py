@@ -77,6 +77,7 @@ from ..optimization.compatibility import (
 from ..optimization.blockswap import is_blockswap_enabled, validate_blockswap_config, apply_block_swap_to_dit, cleanup_blockswap
 from ..optimization.memory_manager import cleanup_dit, cleanup_vae
 from ..utils.constants import find_model_file
+from ..utils.dit_size import CONFIG_DIR_BY_DIT_SIZE, choose_dit_size  # Local patch (Forge Neo)
 
 
 def _configs_equal(config1: Optional[Dict[str, Any]], config2: Optional[Dict[str, Any]]) -> bool:
@@ -698,10 +699,12 @@ def _create_new_runner(
     
     Args:
         dit_model: DiT model filename (determines config selection)
-                  - Contains "7b" → loads configs_7b/main.yaml
-                  - Otherwise → loads configs_3b/main.yaml
+                  - 36 transformer blocks in the checkpoint header → configs_7b/main.yaml
+                  - 32 blocks → configs_3b/main.yaml
+                  - header unreadable or another block count → "7b" in the name, case-insensitive
+                    (upstream: case-sensitive)
         vae_model: VAE model filename (stored for reference, not used in config selection)
-        base_cache_dir: Base directory for model files (not used directly but passed for context)
+        base_cache_dir: Base directory for model files; the DiT file is looked up in it to read its header
         debug: Debug instance for logging and timing
         
     Returns:
@@ -715,9 +718,10 @@ def _create_new_runner(
              category="runner", force=True)
     
     debug.start_timer("config_load")
-    config_path = os.path.join(script_directory, 
-                              './configs_7b' if "7b" in dit_model else './configs_3b', 
-                              'main.yaml')
+    # Local patch (Forge Neo): config chosen by the checkpoint's contents, not by "7b" in its name
+    dit_size = choose_dit_size(dit_model, find_model_file(dit_model, base_cache_dir))
+    debug.log(f"DiT size: {dit_size.size.value} (from {dit_size.source})", category="runner", force=True)
+    config_path = os.path.join(script_directory, CONFIG_DIR_BY_DIT_SIZE[dit_size.size], 'main.yaml')
     config = load_config(config_path)
     debug.end_timer("config_load", "Config loading")
     
