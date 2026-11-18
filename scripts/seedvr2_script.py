@@ -53,8 +53,9 @@ MODEL_LIFECYCLE = ModelLifecycle(LoadedModelTracker(), release_freed_memory)
 
 
 def import_pipeline() -> SimpleNamespace:
-    """Import the vendored pipeline. Done first in run(), so a broken install fails before any generation or unload;
-    not at module level, so the UI still loads and shows the error instead of the script vanishing."""
+    """Import the vendored pipeline. Called right after the model check in run(), so a broken install fails before any
+    generation or SD unload; not at module level, so the UI still loads and shows the error instead of the script
+    vanishing."""
     from seedvr2_vendor.utils.debug import Debug
     from seedvr2_vendor.core.generation_utils import setup_generation_context, prepare_runner, compute_generation_info
     from seedvr2_vendor.core.generation_phases import encode_all_batches, upscale_all_batches, decode_all_batches, postprocess_all_batches
@@ -267,7 +268,7 @@ class Script(scripts.Script):
         dit_path = os.path.join(scan.folder, dit_model_name)
         vae_path = os.path.join(scan.folder, vae_model_name)
         if MODEL_LIFECYCLE.prepare_run(model_cache, dit_path, vae_path, force_reload):
-            print("[SeedVR2] Cached models dropped (Force Reload, other files or a previous failed run); loading from disk.")
+            print("[SeedVR2] Cached models dropped (Force Reload, changed model files or a UI reload); loading from disk.")
 
         succeeded = False
         try:

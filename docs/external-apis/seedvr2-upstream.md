@@ -27,9 +27,12 @@ Changes we made to vendored files. Re-apply after every upstream sync. Each code
   `seedvr2_vendor/core/model_configuration.py`, `_create_new_runner` (+ the import): the VAE config path is built from the
   package's own folder instead of upstream's folder name joined to the repository root. Test: `tests/seedvr2_vendor/test_package_paths.py`.
 - `seedvr2_vendor/optimization/memory_manager.py`, `cleanup_dit` and `cleanup_vae`: a model that is not cached is no
-  longer moved to the CPU before deletion on any device (upstream skips the move only on MPS). Why: `release_model_memory`
-  frees the GPU storage in place, so the move only put the whole model into system RAM right before dropping it — a
-  ~8 GB RAM peak for 7B fp8 in the default "Unload" mode. Not unit-tested (tests run without torch); checked live.
+  longer moved to the CPU before deletion on any device (upstream skips the move only on MPS). Why: the move only put
+  the whole model into system RAM right before dropping it — a ~8 GB RAM peak for 7B fp8 in the default "Unload" mode.
+  The GPU memory is freed by dropping the model (`runner.dit = None` / `runner.vae = None`) plus the caller's
+  `gc.collect()` and CUDA empty-cache; `release_model_memory` does **not** free it (`param.data.set_()` acts on a
+  detached view, the parameter keeps its storage), so any other reference to the model keeps its VRAM held.
+  Not unit-tested (tests run without torch); to be checked in the live run.
 - `__init__.py` (root, ComfyUI-only): imports `.seedvr2_vendor` instead of `.src`.
 - `requirements.txt` is not synced from upstream: ours lists only what the code imports (upstream's adds `peft`, `matplotlib`).
 

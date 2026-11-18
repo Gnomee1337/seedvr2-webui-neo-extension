@@ -79,10 +79,14 @@ Live-checked on an 8 GB GPU without bf16, 16 GB RAM, 1080px output: 3B GGUF Q6_K
   (~7.9 GB of weights): 7B fp16 (~16 GB) on 12–16 GB GPUs gets no note, a small 7B GGUF (Q4) on 8 GB gets one it may not
   need. The note is computed for the default DiT when the UI is built; a DiT restored from `ui-config.json` may show
   the other model's note until the selection changes (not checked in Forge). Close: threshold from the DiT file size.
-- 🟢 R2 (S1×L2) **"Keep in RAM" reloads both models when only one changes.** Changing only the VAE drops the cached DiT
-  too (a 7B reloads from disk). After Forge's "Reload UI" the kept models stay in RAM untracked until the next run drops them.
+- 🟢 R3 (S3×L1) **An unloaded model's VRAM is freed only when nothing references it.** `release_model_memory` does not
+  free CUDA storage (`external-apis/seedvr2-upstream.md`, local patches); the memory returns when the runner drops the
+  model and `gc.collect()` + empty-cache run. A stray reference would keep the VRAM held with no warning. Check: GPU
+  memory after a run in the live check.
 - 🟢 R3 (S1×L3) **"Unload SD Checkpoint" (on by default) costs a full checkpoint reload on the next generation** — about
   2 minutes with a large checkpoint. It is the price of freeing VRAM; the checkbox hint says so. Idea for a partial unload: `06-IDEAS.md`.
+- 🟢 R2 (S1×L2) **"Keep in RAM" reloads both models when only one changes.** Changing only the VAE drops the cached DiT
+  too (a 7B reloads from disk). After Forge's "Reload UI" the kept models stay in RAM untracked until the next run drops them.
 - 🟢 R2 (S2×L1) **Calls with the old argument list** (API payloads saved before the new controls) get the defaults
   for "After run" and BlockSwap: unload, BlockSwap off.
 

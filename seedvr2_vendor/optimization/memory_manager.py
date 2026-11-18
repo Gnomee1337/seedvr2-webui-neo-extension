@@ -1051,8 +1051,9 @@ def cleanup_dit(runner: Any, debug: Optional['Debug'] = None, cache_model: bool 
         # Move model off GPU if needed
         if param_device.type not in ['meta', 'cpu']:
             # Local patch (Forge Neo): skip the CPU copy before deletion on every device, not only MPS.
-            # release_model_memory frees GPU storage in place, so the copy only put the whole model (~8 GB for
-            # 7B fp8) into system RAM right before it was dropped.
+            # The GPU memory is freed when the model is dropped below (runner.dit = None) and the caller collects
+            # garbage and empties the CUDA cache; the copy only put the whole model (~8 GB for 7B fp8) into
+            # system RAM right before that.
             if not cache_model:
                 if debug:
                     debug.log("DiT not cached - skipping CPU movement before deletion", category="cleanup")

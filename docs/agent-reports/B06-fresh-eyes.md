@@ -160,3 +160,66 @@ R = S1 × L1 = 1 🟢
   block count clamped by both sides). Only the CPU-only case of finding 10.
 - txt2img vs img2img instances: they share the cache ids and the lifecycle by design; a model kept by one tab and
   requested by the other with the same files is reused correctly, other files drop it.
+
+## Re-check after `5f1bac0` and `65beae4`
+
+Reviewed `git diff 3afc913..HEAD`.
+
+### Finding 1 (Unload copied the model to RAM): fixed. The stated reason is wrong; the result holds for a different reason
+
+**The patch** (`seedvr2_vendor/optimization/memory_manager.py:1052-1059`, `:1132-1138`) changes only the condition
+`param_device.type == 'mps' and not cache_model` → `not cache_model`.
+- **Keep in RAM (`cache_model=True`)**: both the old and the new condition are false, so the `else` branch (move to the
+  offload device or CPU) runs exactly as before. Unchanged.
+- **Unload, no BlockSwap**: the CPU move is skipped, then `release_model_memory`, `runner.dit = None`.
+- **Unload, BlockSwap without I/O swap**: the first parameter is an I/O layer on the GPU. Before the patch, the move went
+  through `_handle_blockswap_model_movement` and copied every block to the CPU. Now it is skipped.
+  `cleanup_blockswap(keep_state_for_cache=False)` (`optimization/blockswap.py:860-935`) restores the wrapped forwards,
+  moves only the non-block children (I/O layers, small) to the offload device and drops the BlockSwap attributes.
+  The wrappers hold only `weakref`s to the model and runner (`blockswap.py:481-482,560-561,733`), so no strong
+  reference survives. Correct.
+- **Unload, BlockSwap with I/O swap**: the first parameter is on the CPU, so the `param_device.type not in ['meta', 'cpu']`
+  branch is not entered at all, the same as before the patch. The blocks still on the GPU are never copied. Correct.
+
+**Why the comment is wrong.** The patch comment (`memory_manager.py:1054-1056`) and the `seedvr2-upstream.md` entry
+(lines 29-32) say "`release_model_memory` frees the GPU storage in place". It does not. `param.data.set_()`
+(`memory_manager.py:564,571`) acts on the detached tensor that `.data` returns, not on the parameter. I checked this on
+torch 2.15 (CPU): after `param.data.set_()` the parameter still holds its full storage (4 194 304 bytes before and after
+for a 1024×1024 `Linear`). The tensor mechanics are the same on CUDA. In this run the GPU memory is freed because
+`runner.dit` / `runner.vae` is set to `None`. That drops the last strong reference, and then `release_freed_memory()`
+(now `gc.collect()` + `torch_gc()` after every phase) returns the memory. This works today: no global or cache reference
+to the model remains in Unload mode (I found no strong reference in `core/`, `optimization/` or `models/`).
+
+The release now depends entirely on the model being unreachable. Before the patch, the CPU move freed the VRAM even if
+something still held the model. If a future upstream sync or one of our changes keeps a reference (a debug helper, a
+cache entry, a stored exception), the VRAM stays occupied silently instead of being moved out. R = S3 × L1 = 3 🟢.
+- Fix the comment and the `seedvr2-upstream.md` entry: the memory is freed by dropping the reference plus `gc`, not in place.
+- Optionally replace `param.data.set_()` with `param.set_()` under `torch.no_grad()`, or `param.data = torch.empty(0, device=...)`, so it really frees in place.
+
+**Wrong verification claim.** `seedvr2-upstream.md:32` says "Not unit-tested (tests run without torch); checked live."
+The block card shows step 12 (live check) as not done yet, and live check step 1 was only just extended to watch for
+the RAM peak. Until the owner runs it, "checked live" is not true. Write "to be checked in the live run" until then.
+
+### MINOR findings
+
+| # | Finding | Status |
+|---|---|---|
+| 2 | "0 = off" while I/O swap is on | **Fixed in the UI**: the slider label no longer says "0 = off" (`scripts/seedvr2_script.py:148`). **Still open in the docs**: `docs/09-PROCESSES.md:36` still says "BlockSwap blocks (0–36, 0 = off)", and the card (line 28) says the same. The checkbox alone still turns BlockSwap on; nothing in the UI says so. |
+| 3 | 7B note keyed on family, not size | **Moved to `07-RISKS.md`** (R4, "judges the model family, not its size") |
+| 4 | VAE change drops the DiT | **Moved to `07-RISKS.md`** (R2, "reloads both models when only one changes") |
+| 5 | Console messages | **Fixed**: the message is always shown now (`scripts/seedvr2_script.py:269-270`). Its text gives the wrong reasons, though: "(Force Reload, other files or a previous failed run)". A failed run already empties the cache in `finish_run`, so the next `prepare_run` finds nothing to drop and prints nothing. The real third case is a fresh tracker after Forge's "Reload UI" or a script reload. 🟢 R1, still open |
+| 6 | Save failure keeps models, doc said otherwise | **Fixed** in `09-PROCESSES.md` (steps 9 and "On failure") |
+| 7 | Startup note for the default DiT, not the restored one | **Moved to `07-RISKS.md`** (inside the 7B-note entry, marked "not checked in Forge") |
+| 8 | Module-level vendored import / docstring | **Import fixed**: `dit_size` is now imported lazily in `is_7b_checkpoint` (`seedvr2_neo/memory_plan.py:81-92`), with an `ImportError` fallback. **Still open (wording)**: the `import_pipeline` docstring (`scripts/seedvr2_script.py:56`) still says "Done first in run()", but the model check runs first. Only `ImportError` is caught at `:195`; a `RuntimeError`/`OSError` at import still escapes raw. 🟢 R1 |
+| 9 | Vendored import side effects | **Moved to `external-apis/seedvr2-upstream.md`** ("Import side effects") |
+| 10 | Vendored code picks devices itself; CPU-only BlockSwap error | **Moved to `external-apis/seedvr2-upstream.md`**. `02-ARCHITECTURE.md:66` still says "running the four phases on Forge's device" without the caveat. Acceptable, since the caveat is one link away |
+| 11 | No `gc.collect()` between phases | **Fixed**: `release_freed_memory()` after phases 1–3 (`scripts/seedvr2_script.py:380,386,392`). The new patch now depends on this (see above) |
+| 12 | Kept models untracked after "Reload UI" | **Moved to `07-RISKS.md`** (in the R2 entry with finding 4) |
+| 13 | Docstring promised no spill | **Fixed** (`scripts/seedvr2_script.py:336-338`, "less likely to spill") |
+
+### Summary of the re-check
+No BLOCKER and no IMPORTANT left. Still open, all MINOR:
+1. The patch comment and the `seedvr2-upstream.md` entry give the wrong mechanism ("in place"), and the entry claims a live check that has not happened. R3.
+2. The "dropped" message lists "a previous failed run", which cannot trigger it. R1.
+3. `09-PROCESSES.md:36` still says "0 = off". R1.
+4. The `import_pipeline` docstring still says "Done first". R1.

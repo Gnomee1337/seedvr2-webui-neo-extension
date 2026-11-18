@@ -33,7 +33,7 @@ The source of truth is the code.
 5. Selecting a DiT reads its size from the header (process 5, step 6); a 7B on a CUDA GPU with less than 11 GiB total
    memory shows a note recommending BlockSwap. Unknown size or GPU → no note.
 6. Controls: seed, resolution (shortest edge, 512–3840), unload SD, save original, force reload, debug logs;
-   "After run" (Unload SeedVR2 — default / Keep in RAM), BlockSwap blocks (0–36, 0 = off), BlockSwap I/O layers;
+   "After run" (Unload SeedVR2 — default / Keep in RAM), BlockSwap blocks (0–36), BlockSwap I/O layers (BlockSwap is on when either is set);
    "Advanced": input/latent noise, VAE tiling, tile size and overlap.
 
 **Writes:** nothing.
@@ -79,7 +79,7 @@ The source of truth is the code.
 7. Phases 1–4: encode (VAE) → upscale (DiT, one step; text embeddings loaded here) → decode (VAE) → post-process (LAB
    color correction). Interruption is checked between phases. After each of the first three phases dropped objects
    are collected and the allocator's cached VRAM is returned (`gc.collect()` + `devices.torch_gc()`). A model that is
-   not cached is freed in place on the GPU, without a copy to RAM (local patch, `external-apis/seedvr2-upstream.md`).
+   not cached is dropped straight from the GPU, without a copy to RAM (local patch, `external-apis/seedvr2-upstream.md`).
 8. Output tensor → PIL; `SeedVR2 Model` and `SeedVR2 Resolution` added to the generation parameters;
    saved to `p.outpath_samples` with `-seedvr2`; returned as the only image of the result.
 9. End of run (`seedvr2_neo/model_lifecycle.py`): "Keep in RAM" after the four phases succeeded → models stay cached
