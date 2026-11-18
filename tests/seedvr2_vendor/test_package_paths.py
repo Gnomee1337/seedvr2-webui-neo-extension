@@ -12,9 +12,9 @@ PACKAGE_DIR = Path(importlib.util.find_spec("seedvr2_vendor").origin).resolve().
 REPO_ROOT = PACKAGE_DIR.parent
 
 # `from src...` / `from .src...`, `src` anywhere in an `import` list, or a string that is `src` or starts with
-# `src/`, `src\` or `src.` (paths, dotted module names for importlib).
+# `src/`, `src\` or `src.` (paths, dotted module names for importlib), or an unquoted YAML value that does.
 OLD_NAME_REFERENCE = re.compile(
-    r"""^\s*from\s+\.?src\b|^\s*import\s+[\w., ]*\bsrc\b|['"]src(['"/\\.])""", re.MULTILINE
+    r"""^\s*from\s+\.?src\b|^\s*import\s+[\w., ]*\bsrc\b|['"]src(['"/\\.])|:\s*src[/\\.]""", re.MULTILINE
 )
 
 
@@ -55,6 +55,9 @@ def test_vae_config_path_does_not_depend_on_the_working_directory(tmp_path, monk
     "os.path.join(root, 'src', 'models')",
     "importlib.import_module('src.utils')",
     'Path(root) / "src"',
+    "  path: src.models.dit_3b.nadit",
+    "  path: src/models/x.yaml",
+    "__inherit__: src/models/a.yaml",
 ])
 def test_pattern_catches_old_name_forms(line):
     assert OLD_NAME_REFERENCE.search(line)

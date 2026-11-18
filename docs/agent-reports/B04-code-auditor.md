@@ -132,3 +132,44 @@ The main chat was editing in parallel; at the end of the audit the working tree 
 - `tests/pytest.ini` / `05-DECISIONS.md` claim that importlib mode would register `tests/seedvr2_vendor` as `seedvr2_vendor`:
   consistent with the rootdir being `tests/`; default prepend mode passes (`find_spec("seedvr2_vendor")` resolves to the real
   regular package — a namespace portion could not win anyway).
+
+## Re-check after `b078dcb`
+
+Tests: **271 passed, 1 skipped, 2 xfailed** (`uv run ... pytest tests -q`).
+
+- **I-1 — closed.** `get_vae_config_path()` (`seedvr2_vendor/utils/constants.py:38-44`) is the single source; it is used at
+  `seedvr2_vendor/core/model_configuration.py:1121` (import at `:79`, both marked `Local patch (Forge Neo)`). The test calls
+  the function and asserts `is_file()` plus `parent == PACKAGE_DIR/models/video_vae_v3`. A wrong `dirname` count gives
+  `seedvr2_vendor/utils/models/...` or `<repo>/models/...` (neither exists), so `is_file()` fails; the cwd test pins that the path
+  is absolute and cwd-independent.
+- **M-1 — closed, with a narrow leftover (new MINOR N-1 below).** All five forms I reported now match; YAML under
+  `seedvr2_vendor/` and `configs_*/` is scanned; the negative cases (`src=src`, `mean_src`, `'srcset'`) do not match.
+- **M-2 — closed** (README update step, `forge-neo.md` fact, two 🟢 entries in `07-RISKS.md` incl. the orphan `src/` folder).
+- **M-3 — closed** in `01-VISION.md`, `02-ARCHITECTURE.md`; `04-STATE.md:35` left for `/block-done`, as agreed.
+- **M-4 — closed** (`requirements.txt` line removed from NOTICE; `seedvr2-upstream.md` no longer contradicts itself).
+- **M-5 — closed** (`.gitignore`, `seedvr2_neo` docstrings); `04-STATE.md:18,22` left for `/block-done`, as agreed.
+- **M-6 — closed** as the owner's recorded decision in `05-DECISIONS.md`.
+- New in the fix, checked and fine: the `ImportError` print in `scripts/seedvr2_script.py:208`; the new `07-RISKS.md` entries
+  match the code.
+
+### New findings
+
+**N-1. MINOR 🟢 R2 (S2×L1) — unquoted YAML values are still not caught.**
+`tests/seedvr2_vendor/test_package_paths.py` (`OLD_NAME_REFERENCE`). The string branch needs a quote before `src`, but YAML
+scalars are usually unquoted — the configs themselves have `path: projects.video_diffusion_sr.train` unquoted
+(`configs_3b/main.yaml:2`, `configs_7b/main.yaml:2`). Verified no match for `path: src.models.dit_3b.nadit`,
+`path: src/models/x.yaml`, `__inherit__: src/models/a.yaml`. Scenario: an upstream sync writes an `__object__.path` or
+`__inherit__` as unquoted `src....` → `import_item`/`load_config` fail at runtime, test green.
+Fix: add a YAML branch such as `:\s*src[/\.]` (multiline) and those three lines to `test_pattern_catches_old_name_forms`.
+Side note, not a finding: the `import` branch also matches `import torch.nn.functional as src` and `kwargs['src']` is matched by
+the string branch — false positives only, they fail loudly and cost nothing today (no such line exists).
+
+**N-2. MINOR 🟢 R1 (S1×L2) — the local-patch list names the wrong function.**
+`docs/external-apis/seedvr2-upstream.md:27` says the VAE-path patch is in `_create_new_runner`; it is in `_setup_vae_model`
+(`seedvr2_vendor/core/model_configuration.py:1069`, use at `:1121`). Scenario: re-applying patches after an upstream sync, the
+reader looks for the VAE path in the wrong function. (Present since `b1a5b39`, I missed it in the first pass.)
+Fix: replace `_create_new_runner` with `_setup_vae_model` on line 27.
+
+### N-1 fix (main chat)
+Fixed: `:\s*src[/\.]` branch added to `OLD_NAME_REFERENCE`; the three YAML lines above are now parametrized cases in
+`test_pattern_catches_old_name_forms`. Full run: 274 passed, 1 skipped, 2 xfailed; no real file matches.

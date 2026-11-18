@@ -18,7 +18,9 @@ Public GitHub repository, no keys.
 - **"Apply and restart UI" updates an extension with `git fetch --all` + `git reset --hard <remote>/<branch>`**
   (`Extension.fetch_and_reset_hard` in `modules/extensions.py`, called from `modules/ui_extensions.py`). Locally modified
   tracked files are overwritten, files deleted upstream are removed; untracked files (e.g. `__pycache__`) stay. A manual
-  `git pull` has no such guarantee. Source: verified in a Neo install's source (commit `4f4284b`).
+  `git pull` has no such guarantee. The restart that follows ends the Python process (`os._exit(0)` in `modules/restart.py`,
+  after writing `tmp/restart`) and the launcher script starts it again, so nothing loaded by the old code stays in memory;
+  without a launcher watching, the button is "Apply and quit". Source: verified in a Neo install's source (commit `4f4284b`).
 - **The extension root `__init__.py` is never imported**; only `scripts/*.py` are loaded as scripts. Source: verified in source (`modules/scripts.py`, `list_scripts`).
 - **`process_images` returns the grid first.** With more than one image and `opts.return_grid`, `output_images.insert(0, grid)`
   and `index_of_first_image = 1` (`modules/processing.py`). Source: verified in source.

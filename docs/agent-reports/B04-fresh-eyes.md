@@ -113,3 +113,29 @@ the restart, which I did not check. R = S2 × L1 = 2 🟢
 - The removed `seedvr2_vendor.utils.downloads` import had no needed side effects (the module only defines functions).
 - `requirements.txt` matches the third-party top-level imports (plus `Pillow` for `PIL`). `peft` and `matplotlib` are imported nowhere.
 - `LICENSE` is the stock Apache-2.0 text.
+
+## Re-check after `b078dcb`
+Full test run: 271 passed, 1 skipped, 2 xfailed (Python 3.10, uv).
+
+| # | Finding | Status |
+|---|---|---|
+| 1 | Same Script title as the original extension | **Closed for B04.** README now says to install only one SeedVR2 extension and why. `07-RISKS.md` §5 records it (R2). The roadmap B08 row "title without (24G)" would also make the title differ from the original's. |
+| 2 | Manual `git pull` vs removed `.pyc` | **Closed.** README item 3 gives the recovery command and says what it discards. `forge-neo.md` now records that Forge's updater does `fetch --all` + `reset --hard` (verified in a Neo install), and the risk is in `07-RISKS.md`. |
+| 3 | License of the original author's code | **Closed as an owner decision.** `05-DECISIONS.md` records that the original had no license file and that the owner accepted publishing under Apache-2.0. NOTICE itself still does not say the original had no license. That is the owner's informed choice, not an open defect. |
+| 4 | Leftover `src/` folder | Closed (recorded in `07-RISKS.md`, R3; no README line, acceptable). |
+| 5 | Late, silent import error | Closed for B04: now printed to the console, and the risk is recorded. **New nit:** `07-RISKS.md` says "Moving the import before the work: B06", but the B06 row in `03-ROADMAP.md` does not list it. Add it to the B06 card when it is written, or it gets lost. |
+| 6 | Docs said root `__init__.py` untouched | Closed (`01-VISION.md`, `02-ARCHITECTURE.md` fixed). `04-STATE.md` is deferred to block closing, as agreed. |
+| 7 | `gguf` origin contradiction | Closed (`requirements.txt` comment now says "bundled copy, not a pip package", consistent with README). |
+| 8 | NOTICE vs "Ours" for `requirements.txt` | Closed (line removed from NOTICE; `seedvr2-upstream.md` rephrased as "not synced from upstream"). |
+| 9 | Narrow old-name regex | Closed. It now also catches import lists, `'src'` path parts, `'src.x'` module strings, and `.yaml` in the package and `configs_*`. Positive and negative cases are parametrized, and the current tree passes. |
+| 10 | Collision moved to new names | Closed (recorded in `07-RISKS.md`, R1). |
+| 11 | In-process UI reload orphans old `src` cache (unverified) | **Still open, low.** `forge-neo.md` now covers how files are updated, but not whether "Apply and restart UI" restarts the process. One-time effect per update; fine to leave unverified or add a line to `07-RISKS.md`. |
+
+New code in `b078dcb`: `get_vae_config_path()` (`seedvr2_vendor/utils/constants.py`) resolves to
+`seedvr2_vendor/models/video_vae_v3/...` (two `dirname`s from `utils/constants.py`). It is marked as a local patch, listed in
+`seedvr2-upstream.md`, and tested for the file's existence and independence from the working directory. The import line in
+`model_configuration.py` carries the marker. Nothing new found.
+
+### Follow-up (main chat)
+- #5: "pipeline import before any work" is added to the B06 row of `03-ROADMAP.md`.
+- #11: closed — "Apply and restart UI" ends the process (`os._exit(0)`) and the launcher restarts it; fact in `forge-neo.md`.
