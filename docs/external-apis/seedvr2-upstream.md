@@ -23,10 +23,11 @@ Changes we made to vendored files. Re-apply after every upstream sync. Each code
 - **Package folder renamed** `src/` → `seedvr2_vendor/` (no file content changes from the rename itself: imports inside the
   package are relative). Why: Forge puts every extension folder on `sys.path`, and other SeedVR2 ports also ship a top-level
   `src`; whichever loads first is reused by both. Test: `tests/seedvr2_vendor/test_package_paths.py`.
-- `seedvr2_vendor/core/model_configuration.py`, `_create_new_runner`: the VAE config path is built from the package's own
-  folder instead of the literal `'src/models/video_vae_v3/...'` under the repository root.
+- `seedvr2_vendor/utils/constants.py`, `get_vae_config_path` (new function) and its use in
+  `seedvr2_vendor/core/model_configuration.py`, `_create_new_runner` (+ the import): the VAE config path is built from the
+  package's own folder instead of upstream's folder name joined to the repository root. Test: `tests/seedvr2_vendor/test_package_paths.py`.
 - `__init__.py` (root, ComfyUI-only): imports `.seedvr2_vendor` instead of `.src`.
-- `requirements.txt` is rewritten as our own informational list: upstream's `peft` and `matplotlib` are not imported by the code.
+- `requirements.txt` is not synced from upstream: ours lists only what the code imports (upstream's adds `peft`, `matplotlib`).
 
 ## Common pitfalls
 - **Caching requires an offload device.** Upstream's own loaders refuse `cache_model=True` without an offload device

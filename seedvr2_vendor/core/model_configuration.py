@@ -76,7 +76,7 @@ from ..optimization.compatibility import (
 )
 from ..optimization.blockswap import is_blockswap_enabled, validate_blockswap_config, apply_block_swap_to_dit, cleanup_blockswap
 from ..optimization.memory_manager import cleanup_dit, cleanup_vae
-from ..utils.constants import find_model_file
+from ..utils.constants import find_model_file, get_vae_config_path  # Local patch (Forge Neo): + get_vae_config_path
 from ..utils.dit_size import CONFIG_DIR_BY_DIT_SIZE, choose_dit_size  # Local patch (Forge Neo)
 
 
@@ -1118,10 +1118,7 @@ def _setup_vae_model(
     elif not hasattr(runner, 'vae') or runner.vae is None:
         # Create new VAE model
         # Configure VAE
-        # Local patch (Forge Neo): resolved from this package's folder, which is not named `src` here
-        package_directory = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-        vae_config_path = os.path.join(package_directory,
-                                      'models', 'video_vae_v3', 's8_c16_t4_inflation_sd3.yaml')
+        vae_config_path = get_vae_config_path()  # Local patch (Forge Neo): the package is not named `src` here
         vae_config = load_config(vae_config_path)
         
         spatial_downsample_factor = vae_config.get('spatial_downsample_factor', 8)

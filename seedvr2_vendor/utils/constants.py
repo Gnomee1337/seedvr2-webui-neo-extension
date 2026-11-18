@@ -35,6 +35,15 @@ def get_script_directory() -> str:
     return os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 
+def get_vae_config_path() -> str:
+    """
+    Local patch (Forge Neo): the VAE model config inside this package, found from the package's own folder.
+    Upstream joins a path under its own folder name to the repository root; the package is renamed here.
+    """
+    package_directory = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    return os.path.join(package_directory, 'models', 'video_vae_v3', 's8_c16_t4_inflation_sd3.yaml')
+
+
 def get_base_cache_dir() -> str:
     """
     Get the default model cache directory path.

@@ -205,6 +205,7 @@ class Script(scripts.Script):
             args.compile_vae = False
 
         except ImportError as e:
+            print(f"❌ [SeedVR2] Cannot import the pipeline: {e}")
             return empty_result(p, f"Error: {e}")
 
         # Image preprocessing: PIL -> [1, H, W, C] float16 tensor

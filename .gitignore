@@ -20,5 +20,5 @@ __pycache__/
 .ruff_cache/
 
 # Model weights are downloaded by the user, never committed.
-# Anchored to the root: src/models/ is source code and must stay tracked.
+# Anchored to the root: seedvr2_vendor/models/ is source code and must stay tracked.
 /models/

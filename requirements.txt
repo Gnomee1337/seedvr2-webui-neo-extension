@@ -1,5 +1,6 @@
 # Informational: Forge Neo does not read this file.
-# Everything except rotary-embedding-torch comes with Forge Neo itself; install.py installs that one at launch.
+# Everything except rotary-embedding-torch comes with Forge Neo itself (gguf as Neo's bundled copy, not a pip package);
+# install.py installs rotary-embedding-torch at launch.
 torch
 torchvision
 safetensors

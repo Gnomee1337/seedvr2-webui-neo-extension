@@ -115,7 +115,7 @@ None: the extension does not act on other people's data. Behaviour is controlled
 Code that is never called in Forge. Only the owner deletes it.
 | What | Why it is dead | Plan |
 |---|---|---|
-| `__init__.py` (root) | Forge never imports the extension root as a package; it imports `comfy_api` which does not exist in Forge | keep untouched — upstream diffing (`05-DECISIONS.md`) |
+| `__init__.py` (root) | Forge never imports the extension root as a package; it imports `comfy_api` which does not exist in Forge | keep as in upstream except the package rename — upstream diffing (`05-DECISIONS.md`) |
 | `seedvr2_vendor/interfaces/` | ComfyUI nodes; import `comfy_api` / `comfy_execution` | keep untouched — upstream diffing (`05-DECISIONS.md`) |
 | `seedvr2_vendor/utils/downloads.py`, `model_registry.py` | nothing in Forge calls the download code (`model_registry` is still used for model classes) | keep — needed if auto-download is taken (`06-IDEAS.md`) |
 | `finally` block keys `images`, `encoded_latents`, `upscaled_latents` in `seedvr2_script.py` | these keys never exist in `ctx`; only `final_video` is real | fix in B06 |

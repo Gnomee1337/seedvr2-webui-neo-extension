@@ -65,7 +65,8 @@ only follows the package rename). Not fixed, not tested here.
 Why: the owner's choice — the same license as the vendored code, so the repository has one license. Apache-2.0 §4(b)
 change notices: a `Local patch (Forge Neo)` comment at each change plus the list in `external-apis/seedvr2-upstream.md`.
 No per-file license headers in our own files: that is ASF guidance, not a §4 condition, and it needs a named copyright holder.
-Existing ByteDance / HuggingFace headers in vendored files are kept as they are (§4(c)).
+Existing ByteDance / HuggingFace headers in vendored files are kept as they are (§4(c)). The original Forge extension
+had no license file; its author is credited in `NOTICE` and `README`, and the owner accepted publishing under Apache-2.0 on that basis.
 
 ### `requirements.txt` is our own informational list, not upstream's
 Why: Forge Neo does not read it (`install.py` installs what is missing), so it only informs a reader; upstream's copy listed

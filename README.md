@@ -16,6 +16,12 @@ port [numz/ComfyUI-SeedVR2_VideoUpscaler](https://github.com/numz/ComfyUI-SeedVR
    ```
 
    `gguf` is needed only for `.gguf` models; Forge Neo does not install it as a separate package.
+3. Updating: Forge's **Check for updates**, then **Apply and restart UI**, works as usual. If you cloned the extension by hand and `git pull`
+   stops with "local changes would be overwritten" (old versions kept compiled `.pyc` files in git), run
+   `git reset --hard origin/main` in the extension folder; it discards local edits to the extension's files.
+
+Install only one SeedVR2 extension for Forge. The original one shows the same name in the **Script** list, and each
+keeps its own copy of the models in memory.
 
 ## Models
 

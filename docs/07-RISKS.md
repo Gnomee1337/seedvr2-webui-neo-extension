@@ -104,6 +104,18 @@ Live-checked on an 8 GB GPU without bf16, 16 GB RAM, 1080px output: 3B GGUF Q6_K
 
 ## 5. Code hygiene
 - 🟢 R3 (S1×L3) **No CI; `scripts/seedvr2_script.py` has no tests** (needs Forge stubs). (B09)
+- 🟢 R3 (S1×L3) **Leftover `src/` folder after an update.** Forge's update (`reset --hard`) removes the tracked files but
+  keeps untracked `src/**/__pycache__`. Harmless: nothing imports `src`, and a folder without `__init__.py` loses to
+  another extension's real `src` package. Users may delete it by hand.
+- 🟢 R2 (S1×L2) **Manual `git pull` can stop on the removed `.pyc` files** that Python rewrote locally. Forge's own update
+  is not affected (`external-apis/forge-neo.md`); the README gives `git reset --hard origin/main`.
+- 🟢 R2 (S1×L2) **Same Script title as the original SeedVR2 Forge extension** ("SeedVR2 Native Upscaler (24G)"): with both
+  installed the entries look alike, and `run()` matches scripts by title when it removes itself before txt2img. README
+  asks to install only one; the title changes in B08.
+- 🟢 R2 (S1×L2) **A pipeline import error shows up only after the base image and the SD unload** (`run()` imports the
+  pipeline late). It is printed to the console and returned as `Error: ...`. Moving the import before the work: B06.
+- 🟢 R1 (S1×L1) **Our top-level package names `seedvr2_neo` / `seedvr2_vendor` can still collide** with a future extension
+  that uses the same names; no check exists. Unlikely with these names.
 
 ## Top risks
 1. 🟠 R9 7B practically unusable on 8 GB, no low-VRAM path — section 3.
