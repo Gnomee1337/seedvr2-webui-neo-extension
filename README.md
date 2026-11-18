@@ -16,6 +16,12 @@ port [numz/ComfyUI-SeedVR2_VideoUpscaler](https://github.com/numz/ComfyUI-SeedVR
    ```
 
    `gguf` is needed only for `.gguf` models; Forge Neo does not install it as a separate package.
+3. Updating: Forge's **Check for updates**, then **Apply and restart UI**, works as usual. If you cloned the extension by hand and `git pull`
+   stops with "local changes would be overwritten" (old versions kept compiled `.pyc` files in git), run
+   `git reset --hard origin/main` in the extension folder; it discards local edits to the extension's files.
+
+Install only one SeedVR2 extension for Forge. The original one shows the same name in the **Script** list, and each
+keeps its own copy of the models in memory.
 
 ## Models
 
@@ -24,9 +30,6 @@ Put the models into `<WebUI root>/models/SeedVR2/` (the folder name may be in an
 a VAE but `extensions/<this extension>/models/SeedVR2/` does, the extension folder is used instead. Earlier versions looked in the extension folder
 first: if you keep full sets in both places, the WebUI folder is now the one used. The folder in use is printed in the
 console on every run; when no models are found, the script panel shows the exact path to put them in.
-
-Do not install another SeedVR2 extension at the same time: both ship a package named `src`, and if the other one is
-loaded first the run stops with a message naming that extension.
 
 You need:
 
@@ -68,5 +71,10 @@ The entry point for Claude Code is [`CLAUDE.md`](CLAUDE.md).
 ## Credits
 
 - [SeedVR / SeedVR2](https://github.com/ByteDance-Seed/SeedVR) — ByteDance Seed.
-- [ComfyUI-SeedVR2_VideoUpscaler](https://github.com/numz/ComfyUI-SeedVR2_VideoUpscaler) — the pipeline code in `src/`.
+- [ComfyUI-SeedVR2_VideoUpscaler](https://github.com/numz/ComfyUI-SeedVR2_VideoUpscaler) — the pipeline code in `seedvr2_vendor/` (upstream folder `src/`).
+- [ComfyUI-GGUF](https://github.com/city96/ComfyUI-GGUF) — the GGUF dequantization code.
 - Original Forge extension — akoyaki ayagi.
+
+## License
+
+Apache License 2.0 — see [`LICENSE`](LICENSE). Attribution and the list of changes to the vendored code — [`NOTICE`](NOTICE).

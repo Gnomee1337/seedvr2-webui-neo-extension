@@ -39,9 +39,8 @@ The source of truth is the code.
 ## 3. txt2img + SeedVR2  🟡
 **Trigger:** Generate in txt2img with the script selected. `Script.run()`.
 
-0. Models are rescanned (process 2). No folder, no DiT or VAE in it, nothing selected, a selected file not in the folder,
-   or another extension's `src` package loaded instead of ours → one line in the console and an empty result with
-   `SeedVR2: <reason>` (also as its infotext); no base image is generated. Otherwise the folder and file names are printed.
+0. Models are rescanned (process 2). No folder, no DiT or VAE in it, nothing selected, a selected file not in the folder
+   → one line in the console and an empty result with `SeedVR2: <reason>` (also as its infotext); no base image is generated. Otherwise the folder and file names are printed.
 1. Remove this script from `p.scripts.scripts`, call `processing.process_images(p)` (normal generation with all
    other extensions, images saved as usual), put the script back.
 2. If interrupted — return the base result. Take `processed_base.images[0]` (with batch > 1 and grids enabled this is the grid).

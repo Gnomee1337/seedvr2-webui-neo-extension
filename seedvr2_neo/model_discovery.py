@@ -2,7 +2,7 @@
 
 Pure file-system logic with no Forge or Gradio imports, so it is testable on its own.
 `scripts/seedvr2_script.py` turns a `ModelScan` into dropdowns and a note, and passes
-`ModelScan.folder` to the vendored pipeline (`src/`), which loads the chosen files from it.
+`ModelScan.folder` to the vendored pipeline (`seedvr2_vendor/`), which loads the chosen files from it.
 """
 from __future__ import annotations
 

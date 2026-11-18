@@ -1,46 +1,55 @@
 # SeedVR2 upstream — vendored pipeline reference
 
-Facts about the code in `src/` and where it comes from. Each fact has a source.
+Facts about the code in `seedvr2_vendor/` and where it comes from. Each fact has a source.
 
 ## Origin
 - **Model:** [ByteDance-Seed/SeedVR](https://github.com/ByteDance-Seed/SeedVR) (SeedVR / SeedVR2).
 - **Pipeline code:** [numz/ComfyUI-SeedVR2_VideoUpscaler](https://github.com/numz/ComfyUI-SeedVR2_VideoUpscaler), version 2.5.24,
   commit `4490bd1` (upstream `HEAD`, no `v2.5.24` tag exists; last tag is `v2.5.23`). License: Apache-2.0 (upstream `LICENSE`).
-- **Verified live:** `src/`, `__init__.py`, `requirements.txt`, `configs_3b/main.yaml`, `configs_7b/main.yaml`, `pos_emb.pt`, `neg_emb.pt`
-  are identical to upstream `4490bd1` (SHA-256 of files, `diff -r` ignoring line endings) except the "Local patches" below.
-  Ours: `scripts/`, `seedvr2_neo/`, `tests/`, `install.py`, `requirements-dev.txt`.
+- **Verified live:** `seedvr2_vendor/` (upstream `src/`), `__init__.py`, `configs_3b/main.yaml`, `configs_7b/main.yaml`, `pos_emb.pt`,
+  `neg_emb.pt` are identical to upstream `4490bd1` (SHA-256 of files, `diff -r` ignoring line endings) except the "Local patches"
+  below. To diff after a sync, compare upstream `src/` with our `seedvr2_vendor/`.
+  Ours: `scripts/`, `seedvr2_neo/`, `tests/`, `install.py`, `requirements.txt`, `requirements-dev.txt`, `LICENSE`, `NOTICE`.
 
 ## Local patches
-Changes we made to vendored files. Re-apply after every upstream sync. Each is marked `Local patch (Forge Neo)` in the code.
-- `src/utils/constants.py`, `find_model_file`: when the caller passes a folder and the file exists there, that path is
+Changes we made to vendored files. Re-apply after every upstream sync. Each code change is marked `Local patch (Forge Neo)`.
+- `seedvr2_vendor/utils/constants.py`, `find_model_file`: when the caller passes a folder and the file exists there, that path is
   returned first. Why: the upstream scan is relative to the working directory, which in Forge is wherever the launcher
-  was started. Test: `tests/src/utils/test_constants.py`.
-- `src/utils/dit_size.py` (new file): reads tensor names from the safetensors / GGUF header and maps the block count
-  (32 / 36) to 3B / 7B; unreadable header or another block count → `"7b"` in the name, case-insensitive. Tests: `tests/src/utils/test_dit_size*.py`.
-- `src/core/model_configuration.py`, `_create_new_runner` (+ one import): the config folder comes from
+  was started. Test: `tests/seedvr2_vendor/utils/test_constants.py`.
+- `seedvr2_vendor/utils/dit_size.py` (new file): reads tensor names from the safetensors / GGUF header and maps the block count
+  (32 / 36) to 3B / 7B; unreadable header or another block count → `"7b"` in the name, case-insensitive. Tests: `tests/seedvr2_vendor/utils/test_dit_size*.py`.
+- `seedvr2_vendor/core/model_configuration.py`, `_create_new_runner` (+ one import): the config folder comes from
   `choose_dit_size` instead of `"7b" in dit_model`; the chosen size and its source are logged.
+- **Package folder renamed** `src/` → `seedvr2_vendor/` (no file content changes from the rename itself: imports inside the
+  package are relative). Why: Forge puts every extension folder on `sys.path`, and other SeedVR2 ports also ship a top-level
+  `src`; whichever loads first is reused by both. Test: `tests/seedvr2_vendor/test_package_paths.py`.
+- `seedvr2_vendor/utils/constants.py`, `get_vae_config_path` (new function) and its use in
+  `seedvr2_vendor/core/model_configuration.py`, `_create_new_runner` (+ the import): the VAE config path is built from the
+  package's own folder instead of upstream's folder name joined to the repository root. Test: `tests/seedvr2_vendor/test_package_paths.py`.
+- `__init__.py` (root, ComfyUI-only): imports `.seedvr2_vendor` instead of `.src`.
+- `requirements.txt` is not synced from upstream: ours lists only what the code imports (upstream's adds `peft`, `matplotlib`).
 
 ## Common pitfalls
 - **Caching requires an offload device.** Upstream's own loaders refuse `cache_model=True` without an offload device
-  ("Model caching (cache_model=True) requires offload_device to be set", `src/interfaces/dit_model_loader.py`,
+  ("Model caching (cache_model=True) requires offload_device to be set", `seedvr2_vendor/interfaces/dit_model_loader.py`,
   `vae_model_loader.py`); the CLI defaults the offload to `cpu` when caching (`inference_cli.py`, `_parse_offload_device`).
   Our script bypasses the loaders and caches with no offload — models stay in VRAM. Source: upstream source.
 - **BlockSwap and `swap_io_components` require a DiT offload device.** Source: `inference_cli.py` help, `dit_model_loader.py`.
 - **Interrupt hook:** `setup_generation_context` sets `ctx['interrupt_fn']` only when ComfyUI is importable; outside ComfyUI it is `None`
   and the phases check interruption only through `progress_callback`. Setting `ctx['interrupt_fn']` to a Forge check gives
-  interruption inside the phases. Source: `src/core/generation_utils.py`, `check_interrupt`.
+  interruption inside the phases. Source: `seedvr2_vendor/core/generation_utils.py`, `check_interrupt`.
 - **Config by file name (upstream):** `configs_7b` if `"7b" in dit_model` (case-sensitive), else `configs_3b` — replaced
-  here by a local patch. Source: `src/core/model_configuration.py`.
+  here by a local patch. Source: `seedvr2_vendor/core/model_configuration.py`.
 - **Model lookup (upstream):** `find_model_file` searches ComfyUI `folder_paths` if present, else `./models/SEEDVR2` relative
   to the working directory, then falls back to the given directory — the given directory now wins (local patch).
-  Source: `src/utils/constants.py`.
-- **Checkpoint layout:** DiT tensor names start with `blocks.<N>.` (`self.blocks` in `src/models/dit_*/nadit.py`); 3B has
+  Source: `seedvr2_vendor/utils/constants.py`.
+- **Checkpoint layout:** DiT tensor names start with `blocks.<N>.` (`self.blocks` in `seedvr2_vendor/models/dit_*/nadit.py`); 3B has
   32 blocks, 7B has 36 (`num_layers` in `configs_*/main.yaml`). Checked on the official 3B fp16, 3B fp8 and 7B sharp fp8
   safetensors and the 3B Q6_K GGUF (detected as 3B from its header in a live run); 7B GGUF not checked.
-- **Text embeddings** are loaded with `torch.load(..., weights_only=True)` — no pickled code is executed. Source: `src/core/generation_utils.py`.
+- **Text embeddings** are loaded with `torch.load(..., weights_only=True)` — no pickled code is executed. Source: `seedvr2_vendor/core/generation_utils.py`.
 
 ## Model files
-Registry with SHA-256 hashes: `src/utils/model_registry.py`; Hugging Face repos `numz/SeedVR2_comfyUI`, `AInVFX/SeedVR2_comfyUI`.
+Registry with SHA-256 hashes: `seedvr2_vendor/utils/model_registry.py`; Hugging Face repos `numz/SeedVR2_comfyUI`, `AInVFX/SeedVR2_comfyUI`.
 
 ## Related project
 [wdhameli0/sd-webui-forge-neo-seedvr2](https://github.com/wdhameli0/sd-webui-forge-neo-seedvr2) (Apache-2.0, v0.3.1) — another Forge Neo
@@ -50,5 +59,43 @@ validation; `clear_memory(deep=True)` cleanup when not caching; image tiling wit
 2×/3×/4× presets; `install.py` that installs `gguf` and never touches torch; a smoke test. Not to copy: it downloads upstream
 source from GitHub at install time without a hash check, and installs unused `peft` / `matplotlib`.
 
+## License
+- **Apache-2.0 §4 (redistribution of the Work or Derivative Works, with or without modification)**, text:
+  [LICENSE-2.0.txt](https://www.apache.org/licenses/LICENSE-2.0.txt). Conditions: (a) give every recipient a copy of the
+  License; (b) modified files carry prominent notices stating that You changed the files; (c) keep, in Source form, all
+  copyright, patent, trademark and attribution notices from the Work; (d) if the Work has a NOTICE file, the Derivative Work
+  must carry its attribution notices in at least one of: a NOTICE file, the source/docs, or a display where third-party
+  notices appear; the NOTICE content is informational and must not modify the License. You may add your own copyright
+  statement for your modifications and use other license terms for them, provided the use of the Work complies with the License.
+- **Form of the §4(b) notice:** the text only says "prominent notices" in the modified files; it prescribes no format. Whether a
+  central list of changes is enough instead of a per-file marker: no primary source found. Safe reading: a short comment in each
+  modified file (ours already carry `Local patch (Forge Neo)`), plus the list in this document.
+- **Renaming a folder of vendored files as a modification:** no primary source.
+- **numz/ComfyUI-SeedVR2_VideoUpscaler** at `4490bd1` ([repo](https://github.com/numz/ComfyUI-SeedVR2_VideoUpscaler)):
+  Apache-2.0 (README: "released under the Apache 2.0 license as found in the LICENSE file"). The root listing has no `NOTICE` file.
+  Its `LICENSE` is the stock text; the only copyright line is the appendix boilerplate `Copyright 2025 seed`
+  ([LICENSE](https://raw.githubusercontent.com/numz/ComfyUI-SeedVR2_VideoUpscaler/4490bd1/LICENSE)), i.e. not a notice naming numz.
+- **License headers in the vendored `seedvr2_vendor/` (identical to upstream apart from the local patches):** 64 of the ~80 `.py` files carry
+  one. Under `common/`, `data/`, `models/dit_3b|dit_7b`, `models/video_vae_v3` and `core/infer.py` the header is
+  `# // Copyright (c) 2025 Bytedance Ltd. and/or its affiliates` followed by the Apache-2.0 boilerplate. `video_vae_v3/modules/video_vae.py`
+  and `attn_video_vae.py` carry `Copyright (c) 2023 HuggingFace Team` + `Copyright (c) 2025 ByteDance Ltd. and/or its affiliates`
+  + "This file has been modified by ByteDance ... on 1st June 2025". These must be kept (§4(c)). The numz-written files
+  (`core/` except `infer.py`, `interfaces/`, `optimization/`, `utils/`) have no license header. Source: files in `seedvr2_vendor/`.
+- **Third-party origin inside numz files:** `seedvr2_vendor/optimization/gguf_dequant.py` says "Adapted from ComfyUI-GGUF"
+  ([city96/ComfyUI-GGUF](https://github.com/city96/ComfyUI-GGUF), Apache-2.0, `LICENSE` is the stock text with no copyright line).
+  `seedvr2_vendor/utils/color_fix.py` cites a paper only (not code).
+- **ByteDance-Seed/SeedVR** ([repo](https://github.com/ByteDance-Seed/SeedVR)): Apache-2.0 (README: "SeedVR and SeedVR2 are licensed under
+  the Apache 2.0"); the root listing has no `NOTICE`; its `LICENSE` has only the appendix line `Copyright 2025 seed`
+  ([LICENSE](https://raw.githubusercontent.com/ByteDance-Seed/SeedVR/main/LICENSE)). The `pos_emb.pt` / `neg_emb.pt` are in both repos.
+- **Applying the license to your own work** ([apply-license](https://www.apache.org/legal/apply-license.html), [licensing-howto](https://infra.apache.org/licensing-howto.html)):
+  one copy of the license text in a file named `LICENSE` in the top directory (not per file); a `NOTICE` file next to it;
+  each original source file "should" carry a short header (appendix boilerplate: `Copyright [yyyy] [name of copyright owner]` +
+  the "Licensed under the Apache License, Version 2.0 ..." paragraph, in the file's comment syntax; fill in the brackets). NOTICE is
+  "reserved for a certain subset of legally required notifications": keep it minimal, add nothing not legally required, preserve
+  copyright notices that were relocated (not removed) from source files, and carry over relevant parts of NOTICE files of bundled
+  Apache-2.0 dependencies. These pages are ASF project guidance; for a non-ASF project they are recommendations, not §4 requirements.
+
 ## Not verified
+- Whether upstream numz has a `NOTICE` file in a place other than the root (the root listing showed none; the GitHub page was
+  summarized, a `git ls-tree` check was not done).
 - Whether a newer upstream release exists after `4490bd1` (2025-12-24 was the latest commit at the time of checking).

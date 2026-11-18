@@ -1,4 +1,3 @@
-import importlib
 import os
 import sys
 import gradio as gr
@@ -16,28 +15,17 @@ import random
 import modules.sd_models
 
 # Extension root directory. Forge already puts every extension folder on sys.path, which is what
-# makes `seedvr2_neo` and the vendored `src` importable; the insert only covers a host that does not.
-# It does not make our `src` win over another extension's `src` — run() checks that explicitly.
+# makes `seedvr2_neo` and the vendored `seedvr2_vendor` importable; the insert only covers a host that does not.
 EXTENSION_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if EXTENSION_ROOT not in sys.path:
     sys.path.insert(0, EXTENSION_ROOT)
 
 from seedvr2_neo.model_discovery import ModelScan, describe_missing_models, find_selection_error, scan_models
-from seedvr2_neo.package_check import VENDORED_PACKAGE, describe_shadowed_package
 
 
 def scan_seedvr2_models() -> ModelScan:
     """Rescan on every call: the user may add files or create the folder while the WebUI runs."""
     return scan_models(shared.models_path, EXTENSION_ROOT)
-
-
-def find_shadowed_package_error() -> str:
-    """Error text if Python resolves `src` to another extension's package, else ""."""
-    try:
-        package = importlib.import_module(VENDORED_PACKAGE)
-    except ImportError as e:
-        return f"Cannot import the SeedVR2 pipeline: {e}"
-    return describe_shadowed_package(package, EXTENSION_ROOT)
 
 
 def empty_result(p, message: str) -> Processed:
@@ -106,7 +94,7 @@ class Script(scripts.Script):
     def run(self, p, dit_model_name, vae_model_name, seed, resolution, input_noise, latent_noise, force_reload, unload_sd, save_original, use_tile_vae, tile_size, tile_overlap, debug_mode):
         # Checked before the base image is generated, so a bad selection costs no generation time
         scan = scan_seedvr2_models()
-        setup_error = find_selection_error(scan, dit_model_name, vae_model_name) or find_shadowed_package_error()
+        setup_error = find_selection_error(scan, dit_model_name, vae_model_name)
         if setup_error:
             print(f"❌ [SeedVR2] {setup_error}")
             return empty_result(p, f"SeedVR2: {setup_error}")
@@ -176,10 +164,9 @@ class Script(scripts.Script):
             print(f"[SeedVR2] Active. DiT: {dit_model_name} | Seed: {actual_seed}")
         
         try:
-            import src.utils.debug as debug_module
-            from src.core.generation_utils import setup_generation_context, prepare_runner, compute_generation_info, load_text_embeddings, script_directory
-            from src.core.generation_phases import encode_all_batches, upscale_all_batches, decode_all_batches, postprocess_all_batches
-            from src.utils.downloads import download_weight
+            import seedvr2_vendor.utils.debug as debug_module
+            from seedvr2_vendor.core.generation_utils import setup_generation_context, prepare_runner, compute_generation_info, load_text_embeddings, script_directory
+            from seedvr2_vendor.core.generation_phases import encode_all_batches, upscale_all_batches, decode_all_batches, postprocess_all_batches
             
             import argparse
             args = argparse.Namespace()
@@ -218,6 +205,7 @@ class Script(scripts.Script):
             args.compile_vae = False
 
         except ImportError as e:
+            print(f"❌ [SeedVR2] Cannot import the pipeline: {e}")
             return empty_result(p, f"Error: {e}")
 
         # Image preprocessing: PIL -> [1, H, W, C] float16 tensor

@@ -22,15 +22,15 @@ PROGRESS = (sum of weights of ✅ blocks) / (sum of weights of ALL blocks) × 10
 
 ## Summary
 
-**Sum of weights: 23. Closed: 9. PROGRESS: 39%.** (Counted by `plan-drift-checker` on closing B05.)
+**Sum of weights: 23. Closed: 11. PROGRESS: 47%.** (Counted by `plan-drift-checker` on closing B04.)
 
 ## Delivery requirements (REQ-1…REQ-6, details — `docs/01-VISION.md`)
 
 | # | Block | Req. | Weight | Status | What remains |
 |---|---|---|---|---|---|
-| B04 | Repo hygiene: `.pyc` out of git, unused import, `requirements.txt`, LICENSE + attribution, `src` package name | REQ-5 | 2 | ⬜ | everything except the UTF-8 `.gitignore` |
+| B04 | Repo hygiene: `.pyc` out of git, unused import, `requirements.txt`, LICENSE + attribution, `src` package name | REQ-5 | 2 | ✅ | — |
 | B05 | Install and model discovery: one model folder resolved in one place, refresh button, empty-folder message, model size not by file name | REQ-1 | 2 | ✅ | — |
-| B06 | VRAM and RAM lifecycle: unload SeedVR2 after run, real Force Reload, release reserved VRAM between phases, Forge device, context reset on error, BlockSwap/offload in the UI and a 7B warning on 8 GB GPUs | REQ-3, REQ-4 | 4 | ⬜ | all |
+| B06 | VRAM and RAM lifecycle: unload SeedVR2 after run, real Force Reload, release reserved VRAM between phases, Forge device, context reset on error, pipeline import before any work (before the base image and the SD unload), BlockSwap/offload in the UI and a 7B warning on 8 GB GPUs | REQ-3, REQ-4 | 4 | ⬜ | all |
 | B07 | Correct results: every image of a batch (not the grid), RGB conversion, infotext, respect save settings, empty-result guard | REQ-2 | 3 | ⬜ | all |
 | B09 | Tests with Forge stubs + GitHub Actions (ruff + pytest) | REQ-6 | 3 | ⬜ | all |
 
@@ -51,10 +51,10 @@ PROGRESS = (sum of weights of ✅ blocks) / (sum of weights of ALL blocks) × 10
 ## How to check the sum
 Add up the "Weight" column across all tables — it must match "Sum of weights" in "Summary":
 B04 2 + B05 2 + B06 4 + B07 3 + B09 3 + B08 2 + B01 3 + B02 3 + B03 1 = **23**.
-Add up the weights of ✅ rows — that is "Closed": B01 3 + B02 3 + B03 1 + B05 2 = **9**.
+Add up the weights of ✅ rows — that is "Closed": B01 3 + B02 3 + B03 1 + B04 2 + B05 2 = **11**.
 
 ## Why this order
-B05 first: a wrong model folder leaves users with empty dropdowns, the most common first-run failure. B04 is small and
-removes noise before real changes. B06 and B07 are the main user-visible problems (7B unusable on 8 GB, memory held
+B05 first: a wrong model folder leaves users with empty dropdowns, the most common first-run failure. B04 removed noise
+before real changes. B06 and B07 are the main user-visible problems (7B unusable on 8 GB, memory held
 after a run, wrong image in batches).
 B09 can start in parallel with B06/B07 — the script logic is easier to fix with tests around it. B08 is polish.

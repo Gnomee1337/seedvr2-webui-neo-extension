@@ -20,8 +20,8 @@ generate and upscale an image in one click without switching to ComfyUI.
 ## Out of scope
 - **Video upscaling** — SeedVR2 supports it, but Forge Neo is an image UI; the pipeline runs with batch size 1 and no temporal overlap.
 - **Multi-GPU** — Forge runs on one device.
-- **ComfyUI support** — ComfyUI has its own SeedVR2 node pack (the upstream). `src/interfaces/` and the root `__init__.py`
-  (ComfyUI entry points) are kept untouched only to make diffing with upstream easy; they are not maintained or tested here.
+- **ComfyUI support** — ComfyUI has its own SeedVR2 node pack (the upstream). `seedvr2_vendor/interfaces/` and the root `__init__.py`
+  (ComfyUI entry points) are kept as in upstream (the root `__init__.py` only follows the package rename) to make diffing easy; they are not maintained or tested here.
 - **Training / fine-tuning SeedVR2.**
 - **Automatic model download** — under discussion, see `06-IDEAS.md`.
 
@@ -34,7 +34,7 @@ Confirmed by the owner. The project is delivered when all requirements are met:
 | REQ-2 | **Correct results for every image** — batch size / batch count > 1 in txt2img upscales every image (not the grid); grayscale/RGBA inputs work; the infotext of the result contains the generation parameters | ⬜ |
 | REQ-3 | **VRAM is given back** — after an upscale the next SD generation on an 8 GB GPU runs without OOM; "Force Reload" really reloads the models | ⬜ |
 | REQ-4 | **Fits 8 GB GPUs, including ones without bf16** (RTX 20xx / GTX 16xx class) — a 3B GGUF model upscales a 1024px image 2× without OOM and without visible artifacts; if 7B cannot work there, the UI says so instead of failing | ⬜ |
-| REQ-5 | **English docs and correct instructions** — README model paths match the code; LICENSE and upstream attribution present | 🔄 |
+| REQ-5 | **English docs and correct instructions** — README model paths match the code; LICENSE and upstream attribution present | ✅ |
 | REQ-6 | **Automated tests in CI** — the script's logic is covered by tests that run on every push | ⬜ |
 
 Statuses: ✅ done · 🔄 partial / awaiting confirmation · ⬜ not started.

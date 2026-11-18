@@ -20,9 +20,9 @@ The source of truth is the code; this document is reconciled with it on every `/
 ```
 <repo root>/                — the extension root (Forge clones it into extensions/)
   scripts/                  — Forge entry point: seedvr2_script.py
-  seedvr2_neo/              — our helpers without Forge/Gradio imports (model folder discovery, `src` package check)
-  tests/                    — pytest, mirrors seedvr2_neo/ and src/; pytest.ini lives here
-  src/                      — vendored SeedVR2 pipeline (ComfyUI-SeedVR2_VideoUpscaler v2.5.24)
+  seedvr2_neo/              — our helpers without Forge/Gradio imports (model folder discovery)
+  tests/                    — pytest, mirrors seedvr2_neo/ and seedvr2_vendor/; pytest.ini lives here
+  seedvr2_vendor/           — vendored SeedVR2 pipeline (ComfyUI-SeedVR2_VideoUpscaler v2.5.24; upstream folder `src/`)
     common/                 — config loading, diffusion samplers/schedules/timesteps, seed, cache, distributed stubs
     core/                   — generation phases, runner/model configuration, model loading, global model cache, inference
     data/image/transforms/  — resize/crop transforms
@@ -33,6 +33,8 @@ The source of truth is the code; this document is reconciled with it on every `/
   configs_3b/, configs_7b/  — main.yaml per model size
   pos_emb.pt, neg_emb.pt    — precomputed positive/negative text embeddings
   install.py                — installs pip packages at Forge launch
+  requirements.txt          — informational dependency list (Forge does not read it)
+  LICENSE, NOTICE           — Apache-2.0 text; attribution of vendored code and the list of our changes to it
   __init__.py               — ComfyUI entry point (dead code in Forge)
   docs/                     — documentation
 ```
@@ -41,9 +43,9 @@ The source of truth is the code; this document is reconciled with it on every `/
 | What | How in this project |
 |---|---|
 | All tests / one area | `python -m pytest tests` / `python -m pytest tests/seedvr2_neo` (from the repository root) |
-| Test layout | `tests/` mirrors `seedvr2_neo/` and `src/`; no `__init__.py` in test folders, default import mode, so test file names must be unique. Planned: `tests/scripts/` with Forge modules (`modules.*`) stubbed in `tests/conftest.py` |
+| Test layout | `tests/` mirrors `seedvr2_neo/` and `seedvr2_vendor/`; no `__init__.py` in test folders, default import mode, so test file names must be unique. Planned: `tests/scripts/` with Forge modules (`modules.*`) stubbed in `tests/conftest.py` |
 | Test file / stress scenarios file name | `test_<module>.py` / `test_<module>_stress.py` |
-| Linter, formatter | none yet; proposed `ruff` on `scripts/` and new code only (not on vendored `src/`) |
+| Linter, formatter | none yet; proposed `ruff` on `scripts/` and new code only (not on vendored `seedvr2_vendor/`) |
 
 ## Entry points
 
@@ -67,10 +69,8 @@ None of its own: the UI lives inside the txt2img / img2img tabs.
 ### seedvr2_neo/
 - `model_discovery.py` — `scan_models(models_path, extension_root)` → `ModelScan` (absolute folder, DiT and VAE file
   names, defaults); the user-facing note for missing models; the reason a selection cannot run. No Forge imports.
-- `package_check.py` — `describe_shadowed_package(package, extension_root)`: error text when the imported `src` package
-  is another extension's, checked by `run()` before any work.
 
-### src/core/
+### seedvr2_vendor/core/
 - `generation_utils.py` — `setup_generation_context` (devices, dtype), `prepare_runner`, `compute_generation_info`, `load_text_embeddings`.
 - `generation_phases.py` — the four phases: `encode_all_batches`, `upscale_all_batches`, `decode_all_batches`, `postprocess_all_batches`.
 - `model_configuration.py` — builds the runner from `configs_3b|7b/main.yaml` (chosen by `utils/dit_size.py`, local patch), sets up DiT and VAE, applies tiling, cache reuse.
@@ -78,19 +78,19 @@ None of its own: the UI lives inside the txt2img / img2img tabs.
 - `model_cache.py` — process-wide `GlobalModelCache` of DiT/VAE models and runner templates, keyed by id (`forge_dit`, `forge_vae`).
 - `infer.py` — `VideoDiffusionInfer`, the diffusion runner. `alpha_upscaling.py` — RGBA support.
 
-### src/optimization/
+### seedvr2_vendor/optimization/
 - `memory_manager.py` — moving models/tensors between devices, `release_model_memory`, cleanup.
 - `blockswap.py` — swapping DiT blocks to CPU (not exposed in the Forge UI).
 - `gguf_ops.py`, `gguf_dequant.py` — quantized layers. `compatibility.py` — optional-package detection (`gguf`, triton, flash/sage attention), bf16 support.
 
-### src/utils/
+### seedvr2_vendor/utils/
 - `constants.py` — model lookup: the folder passed by the caller first (local patch), then upstream's `./models/SEEDVR2`
   relative to the working directory / ComfyUI `folder_paths`.
 - `dit_size.py` — 3B or 7B from the checkpoint header (block count), local addition.
 - `color_fix.py` — LAB / wavelet / AdaIN color correction. `debug.py` — logger and timers.
 - `downloads.py`, `model_registry.py` — Hugging Face downloads with hashes (not used by the Forge script).
 
-### src/models/, src/common/, src/data/
+### seedvr2_vendor/models/, seedvr2_vendor/common/, seedvr2_vendor/data/
 Model definitions and diffusion math, used as is from upstream.
 
 ## Background jobs
@@ -115,8 +115,8 @@ None: the extension does not act on other people's data. Behaviour is controlled
 Code that is never called in Forge. Only the owner deletes it.
 | What | Why it is dead | Plan |
 |---|---|---|
-| `__init__.py` (root) | Forge never imports the extension root as a package; it imports `comfy_api` which does not exist in Forge | keep untouched — upstream diffing (`05-DECISIONS.md`) |
-| `src/interfaces/` | ComfyUI nodes; import `comfy_api` / `comfy_execution` | keep untouched — upstream diffing (`05-DECISIONS.md`) |
-| `src/utils/downloads.py`, `model_registry.py` | the script imports `download_weight` but never calls it | keep if auto-download is taken (`06-IDEAS.md`), otherwise remove the import |
+| `__init__.py` (root) | Forge never imports the extension root as a package; it imports `comfy_api` which does not exist in Forge | keep as in upstream except the package rename — upstream diffing (`05-DECISIONS.md`) |
+| `seedvr2_vendor/interfaces/` | ComfyUI nodes; import `comfy_api` / `comfy_execution` | keep untouched — upstream diffing (`05-DECISIONS.md`) |
+| `seedvr2_vendor/utils/downloads.py`, `model_registry.py` | nothing in Forge calls the download code (`model_registry` is still used for model classes) | keep — needed if auto-download is taken (`06-IDEAS.md`) |
 | `finally` block keys `images`, `encoded_latents`, `upscaled_latents` in `seedvr2_script.py` | these keys never exist in `ctx`; only `final_video` is real | fix in B06 |
 | `argparse.Namespace` fields in `run()` | most fields are built but the calls pass literals instead | simplify in B07 |
