@@ -158,6 +158,75 @@ of a local `neo` checkout finds nothing: Neo neither uses nor reserves such a fo
 - **Saved UI defaults (`ui-config.json`):** a saved dropdown value that is not among the current choices is ignored
   (`check_dropdown`), so stale model names left by older versions do not break the dropdowns. Source: `modules/ui_loadsave.py`.
 
+## Results, infotexts and saving
+Source for all of this section: `neo` branch, files named per item (read via raw GitHub; the page summariser relayed the code,
+quotes are short fragments).
+- **`Processed` fields** (`modules/processing.py`, `Processed.__init__`): `self.images = images_list`,
+  `self.extra_images = extra_images_list`, `self.index_of_first_image = index_of_first_image` (default 0),
+  `self.all_prompts = all_prompts or p.all_prompts or [self.prompt]`, `self.all_seeds = all_seeds or p.all_seeds or [self.seed]`,
+  `self.infotexts = infotexts or [info] * len(images_list)`, `self.comments` from `p.comments`.
+  `js()` dumps `prompt`, `all_prompts`, `all_seeds`, `infotexts`, `index_of_first_image`, ... (not `info`, not `extra_images`).
+- **Gallery:** txt2img and img2img show `processed.images + processed.extra_images`; the generation-info JSON is `processed.js()`
+  (`modules/txt2img.py`, `txt2img_function`; `modules/img2img.py`, `img2img_function`). `opts.do_not_show_images` empties `processed.images`.
+- **Infotext per image:** `update_generation_info` (`modules/ui_common.py`) does `json.loads(generation_info)`, takes the selected
+  gallery index from the browser (`selected_gallery_index()` in the button's `_js`), and shows `generation_info["infotexts"][img_index]`;
+  out of range (`img_index < 0 or >= len(infotexts)`) or any exception keeps the old HTML. The index is the raw gallery index
+  (extra images count), with no `index_of_first_image` subtraction there. `javascript/generationParams.js` only clicks
+  `{tab}_generation_info_button` on gallery click, arrow keys and lightbox close.
+  So each returned image shows its own parameters when `processed.infotexts[i]` matches `processed.images[i]` for every gallery index.
+- **Save button / zip** (`save_files` in `modules/ui_common.py`): uses `data["infotexts"][image_index]` as the saved metadata;
+  `IndexError` there saves that image without metadata and returns early (skips the rest and the zip). `index_of_first_image` decides
+  grid vs single image (`index >= data["index_of_first_image"]` with `opts.save_selected_only`).
+  An `infotexts` list shorter than `images` therefore breaks Save/zip.
+- **`create_infotext(p, ...)`** (`modules/processing.py`) reads from `p`: `steps`, `sampler_name`, `scheduler`, `cfg_scale`,
+  `distilled_cfg_scale`, `width`, `height`, `sd_model` (flags and `model_config`), `all_seeds`/`all_subseeds` (only with
+  `use_main_prompt`), `subseed_strength`, `seed_resize_from_w/h`, `restore_faces`, `main_prompt`, `main_negative_prompt`,
+  `all_negative_prompts` (only as default when the argument is None), `batch_size`, `is_using_inpainting_conditioning`,
+  `sd_model_name`, `sd_model_hash`, `get_token_merging_ratio()`, plus `getattr` for `enable_hr`, `clip_skip`, `init_img_hash`, `user`.
+  The list arguments are used directly: `prompt_text = p.main_prompt if use_main_prompt else all_prompts[index]`.
+  **`p.extra_generation_params` is merged in** (`**p.extra_generation_params`), so a script can add its own keys; callable values
+  are invoked with `value(**locals())`.
+- **Prompt/seed lists:** `p.setup_prompts()` (method of the base class) sets `all_prompts`, `all_negative_prompts`, `main_prompt`,
+  `main_negative_prompt` (`batch_size * n_iter * [prompt]`). `all_seeds` and `all_subseeds` are set only in `process_images_inner`
+  (after `setup_prompts()`, before `p.scripts.process(p)`). `StableDiffusionProcessingImg2Img.init` sets none of these.
+  So in img2img without `process_images`, these lists do not exist until the script sets them (call `p.setup_prompts()` and build
+  the seed lists itself, or pass lists to `create_infotext`).
+- **Img2img Batch tab** (`modules/img2img.py`, `process_batch`): calls `processing.fix_seed(p)` once; per file builds
+  `p.init_images = [img] * p.batch_size`; with an output dir sets `p.outpath_samples = output_dir` and
+  `p.override_settings["save_to_dirs"] = False`; runs `proc = modules.scripts.scripts_img2img.run(p, *args)` and falls back to
+  `process_images(p)` when it returns None; then `batch_results.images.extend(proc.images)` and
+  `batch_results.infotexts.extend(proc.infotexts)` (capped by `opts.img2img_batch_show_results_limit`). It does not call
+  `save_image` and does not set `do_not_save_samples` (checked in the excerpt). Files are saved only by `process_images`
+  via `p.outpath_samples`; a script that returns without `process_images` and saves nothing writes nothing in batch mode, and one that
+  saves itself does not duplicate anything from `process_batch`.
+  `state.job_count = len(batch_images) * p.n_iter` is set there.
+- **Saving inside `process_images_inner`:** the base image is saved with
+  `images.save_image(image, p.outpath_samples, "", p.seeds[i], p.prompts[i], opts.samples_format, info=infotext(i), p=p)`
+  when `p.save_samples()` is true; so saving the same base image again from the script duplicates it. Also saved when enabled:
+  `-before-face-restoration`, `-before-color-correction`, `-mask`, `-mask-composite` (suffixes). Grid: saved when `opts.grid_save`
+  (`p.outpath_grids`, basename `grid`); returned when `opts.return_grid`, suppressed when `len(output_images) < 2 and opts.grid_only_if_multiple`.
+- **`images.save_image` signature** (`modules/images.py`): `save_image(image, path, basename, seed=None, prompt=None, extension="png",
+  info=None, short_filename=False, no_prompt=False, grid=False, pnginfo_section_name="parameters", p=None, existing_info=None,
+  forced_filename=None, suffix="", save_to_dirs=None)`. It does not check `opts.samples_save` (the caller does, via `p.save_samples()`).
+  `suffix` is appended to the generated name (`namegen.apply(file_decoration) + suffix`) and is ignored when `forced_filename` is set.
+  Low-level writer: `save_image_with_geninfo(image, geninfo, filename, extension=None, existing_pnginfo=None, pnginfo_section_name="parameters")`.
+  I found no user option for a filename suffix; only the `suffix` argument.
+- **Extra images:** `Processed(..., extra_images_list=p.extra_result_images)`; `p.extra_result_images = []` is created in
+  `StableDiffusionProcessing.__post_init__`. They are shown after `processed.images` in the gallery (and the API adds them to the
+  base64 list), not inside `processed.images`. Mask images (`-mask`, `-mask-composite`) are appended to `output_images`
+  (`opts.save_mask*`-gated) and so do land in `processed.images`. Generated images count: `len(p.all_seeds)` (= `batch_size * n_iter`);
+  `index_of_first_image` is 1 only when a grid was inserted at 0.
+- **API** (`modules/api/api.py`, `text2imgapi` / `img2imgapi`): `do_not_save_samples = not save_images` and
+  `do_not_save_grid = not save_images` set on `p` (then `save_images` popped); with `send_images` false no images are returned, else
+  `encode_pil_to_base64` over `processed.images + processed.extra_images`; `info` in the response is `processed.js()`
+  (carries `infotexts`; there is no separate `infotexts` field). A selectable script runs through the script runner, else `process_images(p)`.
+- **State** (`modules/shared_state.py`): `skipped` exists (class attribute `False`; `skip()` sets it, `begin()` resets it).
+  `job_count` (`begin()` sets -1, `end()` sets 0), `job_no` (`begin()` sets 0), `nextjob()` increments `job_no` and resets step
+  counters. `process_images_inner` sets `state.job_count = p.n_iter` only `if state.job_count == -1`, calls `state.nextjob()` after each
+  batch, resets `state.skipped` at the top of each batch, and breaks on `state.interrupted or state.stopping_generation`.
+  `state.job` is a free text ("Batch n out of m"). A script that upscales N images can set `state.job_count` and call `state.nextjob()`
+  per image (follows from the fields; not seen in an existing script).
+
 ## Not verified
 - The launch flag name: `backend/args.py` defines `--gpu-device-id`, while a read of `modules/cmd_args.py` showed `--device-id`
   (str); which one Neo's launcher actually accepts, and whether both exist, was not settled.
@@ -167,5 +236,10 @@ of a local `neo` checkout finds nothing: Neo neither uses nor reserves such a fo
   `nvidia-smi` with `torch.cuda.memory_reserved()`).
 - Whether any `modules/` code (not `script_callbacks`) lets an extension ask Forge to release memory before loading the SD
   model: none found in `memory_management.py`; a full search of the tree was not done.
-- Whether `shared.state.skipped` still exists in Neo (used by another extension's interrupt check).
+- `ScriptRunner.run` was only summarised (no state or `do_not_save_samples` handling in it); it was not read line by line.
+- Whether `p.seed == -1` is resolved before `run()` in single-image img2img and txt2img: `fix_seed` is defined in `modules/processing.py`
+  but not called in `img2img_function` / `txt2img_function` or `process_images*` (they call `get_fixed_seed`); only `process_batch`
+  calls it. A script that reads `p.seed` before `process_images` should call `processing.fix_seed(p)` itself (not confirmed as needed).
+- Default value of `save_images` in the API request models (`modules/api/models.py`) was not read.
+- The handler of `{tab}_generation_info_button` is read (see "Results, infotexts and saving"), but the JS `selected_gallery_index()` was not.
 - Behaviour of the "Extras" postprocessing API (`scripts_postprocessing.ScriptPostprocessing`) in Neo — needed for the Extras idea.

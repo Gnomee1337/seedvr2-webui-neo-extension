@@ -1,9 +1,10 @@
 import gc
 import os
 import sys
+import traceback
 from dataclasses import dataclass
 from types import SimpleNamespace
-from typing import Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 import gradio as gr
 from modules import scripts, processing, images, shared, devices
@@ -14,7 +15,6 @@ from torchvision import transforms
 import torch
 import numpy as np
 from PIL import Image
-import random
 
 # Forge model management (used to unload the SD checkpoint and free VRAM)
 import modules.sd_models
@@ -27,9 +27,17 @@ if EXTENSION_ROOT not in sys.path:
 
 from seedvr2_neo.loaded_models import LoadedModelTracker
 from seedvr2_neo.memory_plan import (CPU_DEVICE, MAX_BLOCKS_TO_SWAP, AfterRun, MemoryPlan, build_memory_plan, is_7b_checkpoint,
-                                     low_vram_warning)
+                                     low_vram_warning, parse_flag)
 from seedvr2_neo.model_discovery import ModelScan, describe_missing_models, find_selection_error, scan_models
 from seedvr2_neo.model_lifecycle import DIT_CACHE_ID, VAE_CACHE_ID, ModelLifecycle
+from seedvr2_neo.run_inputs import (group_by_shape, resolve_seed, select_distinct_images, select_generated_images,
+                                    to_pipeline_image)
+from seedvr2_neo.run_results import (RunImage, SavePlan, append_generation_params, failure_generation_params,
+                                     merge_run_images, plan_saving, seedvr2_generation_params)
+
+# File name suffixes of the saved upscaled image and of the extra copy of the image before the upscale.
+RESULT_SUFFIX = "-seedvr2"
+ORIGINAL_SUFFIX = "-original"
 
 
 def scan_seedvr2_models() -> ModelScan:
@@ -107,6 +115,81 @@ class UpscaleRequest:
 # Custom exception used to stop SeedVR2 cleanly when the user presses Interrupt
 class SeedVR2Interrupted(Exception):
     pass
+
+
+def check_interruption(*args, **kwargs) -> None:
+    """Passed to the pipeline as its progress callback. Only `.interrupted` is checked; the `.stopping` check was
+    removed on purpose."""
+    if shared.state.interrupted:
+        raise SeedVR2Interrupted("User interrupted generation.")
+
+
+def images_to_tensor(group_images: List[Image.Image]) -> torch.Tensor:
+    """Same-sized PIL images -> one [N, H, W, C] float16 tensor in [0, 1], the pipeline's input format."""
+    to_tensor = transforms.ToTensor()
+    return torch.stack([to_tensor(image) for image in group_images]).permute(0, 2, 3, 1).to(dtype=torch.float16)
+
+
+def tensor_to_images(frames: torch.Tensor) -> List[Image.Image]:
+    """The pipeline's [N, H, W, C] output -> N PIL images (RGB, or RGBA for 4 channels)."""
+    frames = torch.clamp(frames.detach().cpu().to(dtype=torch.float32), 0, 1)
+    return [Image.fromarray((frame.numpy() * 255.0).astype(np.uint8)) for frame in frames]
+
+
+def fill_img2img_infotext_fields(p, image_count: int, seed: int) -> None:
+    """Set the per-image lists `create_infotext` reads. txt2img gets them from `process_images`; img2img skips it, so
+    they are unset — or left from the previous file of an img2img Batch run, which reuses `p`."""
+    p.all_prompts = [p.prompt] * image_count
+    p.all_negative_prompts = [p.negative_prompt] * image_count
+    p.all_seeds = [seed] * image_count
+    p.all_subseeds = [p.subseed] * image_count
+
+
+def save_originals(p, inputs: List[Image.Image], base_infotexts: List[str]) -> None:
+    """Save the images before the upscale with an `-original` suffix (only when Forge did not save them itself)."""
+    for index, image in enumerate(inputs):
+        info = base_infotexts[index] if index < len(base_infotexts) else None
+        save_result_image(p, image, index, info, ORIGINAL_SUFFIX)
+
+
+def save_result_image(p, image: Image.Image, index: int, infotext: Optional[str], suffix: str) -> None:
+    """Save one image next to Forge's own outputs. A failed write is reported and skipped, so the other images are
+    still saved and shown."""
+    try:
+        images.save_image(image, p.outpath_samples, "", p.all_seeds[index], p.all_prompts[index],
+                          shared.opts.samples_format, info=infotext, p=p, suffix=suffix)
+    except (OSError, ValueError, IndexError) as e:
+        print(f"❌ [SeedVR2] Cannot save image {index + 1}: {type(e).__name__}: {e}")
+
+
+def build_result(p, run_images: List[RunImage], base_infotexts: List[str], params: Dict[str, Any],
+                 failure: Optional[str], result_seed: int, save_plan: SavePlan) -> Processed:
+    """One image and one infotext per input, in input order (Forge pairs them by index). Upscaled images carry the
+    SeedVR2 parameters and are saved by the user's settings; the others carry the reason they were not upscaled."""
+    failure_params = failure_generation_params(failure or "not upscaled")
+    infotexts = []
+    for index, run_image in enumerate(run_images):
+        base_infotext = base_infotexts[index] if index < len(base_infotexts) else ""
+        infotext = make_infotext(p, index, params if run_image.is_upscaled else failure_params, base_infotext)
+        infotexts.append(infotext)
+        if run_image.is_upscaled and save_plan.save_results:
+            save_result_image(p, run_image.image, index, infotext, RESULT_SUFFIX)
+    return Processed(p, [run_image.image for run_image in run_images], result_seed, infotexts[0], infotexts=infotexts)
+
+
+def make_infotext(p, index: int, extra_params: Dict[str, Any], base_infotext: str) -> str:
+    """Forge's infotext of image `index` with `extra_params` added. `p.extra_generation_params` is shared by all images,
+    so it is restored afterwards. If Forge cannot build it, the base image's infotext plus the parameters is used."""
+    saved_params = dict(p.extra_generation_params)
+    p.extra_generation_params.update(extra_params)
+    try:
+        return create_infotext(p, p.all_prompts, p.all_seeds, p.all_subseeds, index=index)
+    except Exception as e:  # Forge's infotext reads many fields of `p`; a missing one must not lose the image
+        print(f"[SeedVR2] Cannot build the infotext of image {index + 1}: {type(e).__name__}: {e}")
+        return append_generation_params(base_infotext, extra_params)
+    finally:
+        p.extra_generation_params.clear()
+        p.extra_generation_params.update(saved_params)
 
 class Script(scripts.Script):
     def title(self):
@@ -199,49 +282,41 @@ class Script(scripts.Script):
             print(f"❌ [SeedVR2] Cannot import the pipeline: {type(e).__name__}: {e}")
             return empty_result(p, f"Error: {e}")
 
-        memory_plan = build_memory_plan(after_run, blocks_to_swap, swap_io_components)
-
-        # --- Interruption check, passed to the pipeline as a progress callback ---
-        def check_interruption(*args, **kwargs):
-            # Only .interrupted is checked; the .stopping check was removed on purpose
-            if shared.state.interrupted:
-                raise SeedVR2Interrupted("User interrupted generation.")
-
-        # --- txt2img: generate the base image first, then upscale it ---
-        if isinstance(p, StableDiffusionProcessingTxt2Img):
-            if debug_mode: print("[SeedVR2] Generating base image (txt2img)...")
-
-            current_script = None
-            if p.scripts is not None:
-                for s in p.scripts.scripts:
-                    if s.title() == self.title():
-                        current_script = s
-                        break
-                if current_script:
-                    p.scripts.scripts.remove(current_script)
-
-            try:
-                processed_base = processing.process_images(p)
-            finally:
-                if current_script and p.scripts:
-                    p.scripts.scripts.append(current_script)
-
+        # --- Inputs: every generated image (txt2img) or every input image (img2img) ---
+        is_txt2img = isinstance(p, StableDiffusionProcessingTxt2Img)
+        if is_txt2img:
+            if debug_mode: print("[SeedVR2] Generating base images (txt2img)...")
+            processed_base = self._generate_base_images(p)
             # Only .interrupted is checked (see check_interruption)
             if shared.state.interrupted:
                 print("[SeedVR2] Interrupted during Txt2Img generation. Stopping SeedVR2.")
-                return processed_base # return the base image as is
-
-            input_img = processed_base.images[0]
-
-            if save_original:
-                 images.save_image(input_img, p.outpath_samples, "", processed_base.seed, p.prompt, shared.opts.samples_format, info=processed_base.info, p=p, suffix="-original")
-
+                return processed_base  # the base images as Forge made them
+            generated_count = len(p.all_seeds or [])
+            inputs = select_generated_images(processed_base.images, processed_base.index_of_first_image, generated_count)
+            base_infotexts = select_generated_images(processed_base.infotexts, processed_base.index_of_first_image,
+                                                     generated_count)
+            result_seed = processed_base.seed
         else:
-            # img2img mode: the diffusion pass is skipped, the input image is upscaled directly
-            # Only .interrupted is checked (see check_interruption)
+            # img2img: the diffusion pass is skipped, the input images are upscaled directly
             if shared.state.interrupted:
-                 return empty_result(p, "Interrupted")
-            input_img = p.init_images[0]
+                return empty_result(p, "Interrupted")
+            inputs = select_distinct_images(p.init_images or [])
+            base_infotexts = []
+        if not inputs:
+            print("❌ [SeedVR2] There is no image to upscale.")
+            return empty_result(p, "SeedVR2: there is no image to upscale")
+
+        # img2img images have no seeds of their own; `p.all_seeds` there may be left from the previous Batch tab file
+        actual_seed = resolve_seed(seed, p.all_seeds if is_txt2img else None, p.seed)
+        if not is_txt2img:
+            fill_img2img_infotext_fields(p, len(inputs), actual_seed)
+            result_seed = actual_seed
+        if debug_mode:
+            print(f"[SeedVR2] Active. DiT: {dit_model_name} | Seed: {actual_seed} | Images: {len(inputs)}")
+
+        save_plan = plan_saving(is_txt2img, p.save_samples(), bool(p.do_not_save_samples), parse_flag(save_original))
+        if save_plan.save_originals:
+            save_originals(p, inputs, base_infotexts)
 
         # --- Free VRAM ---
         if unload_sd:
@@ -249,92 +324,87 @@ class Script(scripts.Script):
             modules.sd_models.unload_model_weights()
             devices.torch_gc()
 
-        # --- Resolve the seed ---
-        if seed == -1:
-            if hasattr(p, 'all_seeds') and p.all_seeds is not None and len(p.all_seeds) > 0 and p.all_seeds[0] != -1:
-                actual_seed = int(p.all_seeds[0])
-            elif p.seed is not None and p.seed != -1:
-                actual_seed = int(p.seed)
-            else:
-                actual_seed = random.randint(0, 2147483647)
-        else:
-            actual_seed = int(seed)
+        request = UpscaleRequest(
+            dit_model=dit_model_name, vae_model=vae_model_name, model_dir=scan.folder,
+            memory_plan=build_memory_plan(after_run, blocks_to_swap, swap_io_components),
+            seed=actual_seed, resolution=int(resolution), input_noise=float(input_noise),
+            latent_noise=float(latent_noise), use_tile_vae=bool(use_tile_vae), tile_size=int(tile_size),
+            tile_overlap=int(tile_overlap))
+        upscaled, failure = self._upscale_images(pipeline, inputs, request, force_reload, debug_mode)
 
-        if debug_mode:
-            print(f"[SeedVR2] Active. DiT: {dit_model_name} | Seed: {actual_seed}")
+        params = seedvr2_generation_params(dit_model_name, vae_model_name, request.resolution, actual_seed)
+        return build_result(p, merge_run_images(inputs, upscaled), base_infotexts, params, failure, result_seed,
+                            save_plan)
 
-        # Image preprocessing: PIL -> [1, H, W, C] float16 tensor
-        img_tensor = transforms.ToTensor()(input_img).unsqueeze(0).permute(0, 2, 3, 1).to(dtype=torch.float16)
+    def _generate_base_images(self, p) -> Processed:
+        """Let Forge generate the txt2img images with every other script applied. This script is taken out of
+        `p.scripts` for that call, so Forge does not call its run() again."""
+        current_script = None
+        if p.scripts is not None:
+            for s in p.scripts.scripts:
+                if s.title() == self.title():
+                    current_script = s
+                    break
+            if current_script:
+                p.scripts.scripts.remove(current_script)
 
+        try:
+            return processing.process_images(p)
+        finally:
+            if current_script and p.scripts:
+                p.scripts.scripts.append(current_script)
+
+    def _upscale_images(self, pipeline, inputs: List[Image.Image], request: UpscaleRequest, force_reload,
+                        debug_mode) -> Tuple[Dict[int, Image.Image], Optional[str]]:
+        """Upscale the inputs, one pipeline pass per group of same-sized images, and unload the models after the last.
+
+        Returns the upscaled images by input index and, when the run stopped early, why. Images of the groups that
+        finished are kept even then."""
         model_cache = pipeline.get_global_cache()
-        dit_path = os.path.join(scan.folder, dit_model_name)
-        vae_path = os.path.join(scan.folder, vae_model_name)
-        if MODEL_LIFECYCLE.prepare_run(model_cache, dit_path, vae_path, force_reload):
+        if MODEL_LIFECYCLE.prepare_run(model_cache, os.path.join(request.model_dir, request.dit_model),
+                                       os.path.join(request.model_dir, request.vae_model), force_reload):
             print("[SeedVR2] Cached models dropped (Force Reload, changed model files or a UI reload); loading from disk.")
 
-        succeeded = False
+        upscaled: Dict[int, Image.Image] = {}
+        failure = None
         try:
             debug = pipeline.Debug(enabled=debug_mode)
-            check_interruption()
-
-            request = UpscaleRequest(
-                dit_model=dit_model_name, vae_model=vae_model_name, model_dir=scan.folder, memory_plan=memory_plan,
-                seed=int(actual_seed), resolution=int(resolution), input_noise=float(input_noise),
-                latent_noise=float(latent_noise), use_tile_vae=bool(use_tile_vae), tile_size=int(tile_size),
-                tile_overlap=int(tile_overlap))
-            output_tensor = self._upscale_tensor(pipeline, img_tensor, request, debug, debug_mode, check_interruption)
-            succeeded = True
-
-            # Convert the output tensor back to a PIL image
-            tensor_f32 = output_tensor[0].cpu().to(dtype=torch.float32)
-            tensor_f32 = torch.clamp(tensor_f32, 0, 1)
-
-            out_np = (tensor_f32.numpy() * 255.0).astype(np.uint8)
-            out_pil = Image.fromarray(out_np)
-
-            # Save the result
-            p.extra_generation_params["SeedVR2 Model"] = dit_model_name
-            p.extra_generation_params["SeedVR2 Resolution"] = resolution
-
-            try:
-                infotext = create_infotext(p, p.all_prompts, p.all_seeds, p.all_subseeds, index=0)
-            except:
-                infotext = ""
-
-            images.save_image(
-                out_pil,
-                p.outpath_samples,
-                "",
-                actual_seed,
-                p.prompt,
-                shared.opts.samples_format,
-                info=infotext,
-                p=p,
-                suffix="-seedvr2"
-            )
-
+            pipeline_images = [to_pipeline_image(image) for image in inputs]
+            for group in group_by_shape(pipeline_images):
+                check_interruption()
+                outputs = self._upscale_group(pipeline, [pipeline_images[index] for index in group], request, debug,
+                                              debug_mode)
+                upscaled.update(zip(group, outputs))
             if not debug_mode: print("[SeedVR2] Done.")
-            return Processed(p, [out_pil], actual_seed, f"SeedVR2 Upscaled")
-
         except SeedVR2Interrupted:
             print("\n⏹️ [SeedVR2] Process Interrupted by User.")
-            return Processed(p, [input_img], p.seed, "Interrupted")
-
-        except Exception as e:
+            failure = "Interrupted"
+        except Exception as e:  # the run's boundary: the user gets their images back with the error in the infotext
             print(f"❌ [SeedVR2 Runtime Error]: {e}")
-            import traceback
             traceback.print_exc()
-            return empty_result(p, f"Runtime Error: {e}")
-
+            failure = f"Runtime Error: {e}"
         finally:
-            output_tensor = None  # drop the last reference to the output before the memory release below
-            kept = MODEL_LIFECYCLE.finish_run(model_cache, memory_plan.cache_models, succeeded)
+            kept = MODEL_LIFECYCLE.finish_run(model_cache, request.memory_plan.cache_models, failure is None)
             print("[SeedVR2] Models kept in RAM for the next run." if kept
                   else "[SeedVR2] Models unloaded, memory released.")
+        return upscaled, failure
+
+    def _upscale_group(self, pipeline, group_images: List[Image.Image], request: UpscaleRequest, debug,
+                       debug_mode) -> List[Image.Image]:
+        """Upscale images of one size and mode in one pipeline pass, as frames of one tensor."""
+        frames = images_to_tensor(group_images)
+        output = self._upscale_tensor(pipeline, frames, request, debug, debug_mode, check_interruption)
+        outputs = tensor_to_images(output)
+        if len(outputs) != len(group_images):
+            raise RuntimeError(f"the pipeline returned {len(outputs)} images for {len(group_images)} inputs")
+        return outputs
 
     @staticmethod
     def _upscale_tensor(pipeline, img_tensor, request: UpscaleRequest, debug, debug_mode, check_interruption):
-        """Run the four SeedVR2 phases on one [1, H, W, C] image tensor and return the pipeline's output tensor.
+        """Run the four SeedVR2 phases on a [N, H, W, C] tensor of N same-sized images and return the pipeline's output.
+
+        With batch size 1 and no temporal overlap the pipeline treats every frame on its own, so the images do not
+        affect each other; the models are loaded once for all of them.
 
         The generation context is built fresh every run, so nothing from a failed or interrupted run is reused. After
         each phase the dropped objects are collected and the allocator's cached VRAM is returned, so the next phase

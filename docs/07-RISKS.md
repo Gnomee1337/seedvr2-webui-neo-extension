@@ -105,20 +105,20 @@ Live-checked on an 8 GB GPU without bf16, 16 GB RAM, 1080px output, VAE tile 512
   for "After run" and BlockSwap: unload, BlockSwap off.
 
 ## 4. Generation flow and results
-- 🟠 R8 (S2×L4) **Only the first image is upscaled.** txt2img with batch size / count > 1: `processed_base.images[0]` —
-  and with "return grid" on (default) that is the grid, so the grid gets upscaled. img2img: only `init_images[0]`. (B07)
-- 🟡 R6 (S2×L3) **Result infotext is "SeedVR2 Upscaled".** `Processed(..., info="SeedVR2 Upscaled")` without `infotexts`:
-  the generation-info panel and "Send to" lose the parameters. In img2img `p.all_prompts` is unset, `create_infotext`
-  fails inside a bare `except`, so the saved PNG has no parameters either. (B07)
-- 🟡 R4 (S2×L2) **Grayscale / palette inputs fail.** `transforms.ToTensor()` on an `L`/`P` image gives 1 channel; the
-  pipeline expects 3 (or 4). Close: `convert("RGB")` unless RGBA. (B07)
-- 🟡 R4 (S2×L2) **Saving ignores the user's settings.** The result is always saved (ignores "Always save all generated
-  images"); "Save Extra Copy of Original" saves the base image a second time. (B07)
-- 🟡 R4 (S2×L2) **Empty base result crashes.** If `process_images` returns no images, `images[0]` raises outside the `try`. (B07)
-- 🟢 R2 (S1×L2) **An error result shifts gallery infotexts.** Empty results carry one infotext and no image. With the ✨
-  (hires upscale) button the selected image drops out of the gallery (still on disk) and later images show their
-  neighbour's infotext; in an img2img batch a failed file shifts the infotexts of later files. Close: return the input
-  image with the error in its infotext. (B07)
+- 🟡 R4 (S2×L2) **B07 result handling is checked with stubs only until the live run.** Batches, infotexts, saving and
+  odd image modes passed a stubbed `run()` and unit tests; real Forge `create_infotext` / `save_image` / Batch tab not
+  yet run (acceptance in the B07 card). If `create_infotext` fails, the fallback infotext lacks Forge's fields.
+- 🟡 R4 (S2×L2) **A large batch holds all frames in RAM at once.** One pass keeps the inputs, latents and outputs of
+  the whole group (on CPU): 8 images at 2048 px are a few hundred MB plus the pipeline's own copies. Not measured.
+- 🟢 R3 (S1×L3) **The interrupt or an error loses the whole group in progress.** Images of one size are one pass, so
+  an interrupt in Phase 2 returns all of them un-upscaled (as inputs with `SeedVR2 Error`); only earlier groups survive.
+- 🟢 R2 (S1×L2) **Inputs of different sizes reload the models per size** in "Unload" mode (img2img via API with
+  mixed sizes). "Keep in RAM" reuses them.
+- 🟢 R2 (S1×L2) **Empty results carry one infotext and no image** (setup errors, nothing to upscale): with the ✨
+  (hires upscale) button the selected image drops out of the gallery (still on disk); in an img2img batch such a file
+  shifts the infotexts of later files.
+- 🟢 R2 (S1×L2) **img2img infotext "Seed" is the SeedVR2 seed** (img2img inputs have no seed of their own); "Send to"
+  puts it into the seed field. The SeedVR2 keys are not read back into the script's controls (B08 candidate).
 - 🟢 R3 (S1×L3) **Interrupt reacts only between phases** and the Forge progress bar is not updated during SeedVR2.
   Close: set `ctx['interrupt_fn']` to a Forge check and update `shared.state.job*` from `progress_callback`. (B08)
 
@@ -139,8 +139,8 @@ Live-checked on an 8 GB GPU without bf16, 16 GB RAM, 1080px output, VAE tile 512
   that uses the same names; no check exists. Unlikely with these names.
 
 ## Top risks
-1. 🟠 R8 Only the first image (or the grid) is upscaled — section 4.
-2. 🟡 R6 VAE decode spills with `--cuda-malloc` — section 3.
-3. 🟡 R6 Result infotext lost — section 4.
-4. 🟡 R4 Corrupt GGUF header can hang the WebUI — section 1.
-5. 🟡 R4 7B with too few BlockSwap blocks; VAE tile 1024 spills on 8 GB — section 3.
+1. 🟡 R6 VAE decode spills with `--cuda-malloc` — section 3.
+2. 🟡 R4 B07 result handling not yet run in a live Forge — section 4.
+3. 🟡 R4 Corrupt GGUF header can hang the WebUI — section 1.
+4. 🟡 R4 7B with too few BlockSwap blocks; VAE tile 1024 spills on 8 GB — section 3.
+5. 🟡 R4 A large batch holds all frames in RAM — section 4.
