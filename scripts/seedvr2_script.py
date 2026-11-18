@@ -1,3 +1,4 @@
+import importlib
 import os
 import sys
 import gradio as gr
@@ -14,17 +15,34 @@ import random
 # Forge model management (used to unload the SD checkpoint and free VRAM)
 import modules.sd_models
 
-# Extension root directory; on sys.path so `seedvr2_neo` and the vendored `src` can be imported
+# Extension root directory. Forge already puts every extension folder on sys.path, which is what
+# makes `seedvr2_neo` and the vendored `src` importable; the insert only covers a host that does not.
+# It does not make our `src` win over another extension's `src` — run() checks that explicitly.
 EXTENSION_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if EXTENSION_ROOT not in sys.path:
     sys.path.insert(0, EXTENSION_ROOT)
 
 from seedvr2_neo.model_discovery import ModelScan, describe_missing_models, find_selection_error, scan_models
+from seedvr2_neo.package_check import VENDORED_PACKAGE, describe_shadowed_package
 
 
 def scan_seedvr2_models() -> ModelScan:
     """Rescan on every call: the user may add files or create the folder while the WebUI runs."""
     return scan_models(shared.models_path, EXTENSION_ROOT)
+
+
+def find_shadowed_package_error() -> str:
+    """Error text if Python resolves `src` to another extension's package, else ""."""
+    try:
+        package = importlib.import_module(VENDORED_PACKAGE)
+    except ImportError as e:
+        return f"Cannot import the SeedVR2 pipeline: {e}"
+    return describe_shadowed_package(package, EXTENSION_ROOT)
+
+
+def empty_result(p, message: str) -> Processed:
+    """A result with no images. `infotexts` is filled because the txt2img ✨ (hires upscale) button reads infotexts[0]."""
+    return Processed(p, [], p.seed, message, infotexts=[message])
 
 
 # Custom exception used to stop SeedVR2 cleanly when the user presses Interrupt
@@ -88,10 +106,10 @@ class Script(scripts.Script):
     def run(self, p, dit_model_name, vae_model_name, seed, resolution, input_noise, latent_noise, force_reload, unload_sd, save_original, use_tile_vae, tile_size, tile_overlap, debug_mode):
         # Checked before the base image is generated, so a bad selection costs no generation time
         scan = scan_seedvr2_models()
-        selection_error = find_selection_error(scan, dit_model_name, vae_model_name)
-        if selection_error:
-            print(f"❌ [SeedVR2] {selection_error}")
-            return Processed(p, [], p.seed, f"SeedVR2: {selection_error}")
+        setup_error = find_selection_error(scan, dit_model_name, vae_model_name) or find_shadowed_package_error()
+        if setup_error:
+            print(f"❌ [SeedVR2] {setup_error}")
+            return empty_result(p, f"SeedVR2: {setup_error}")
         print(f"[SeedVR2] Model folder: {scan.folder} | DiT: {dit_model_name} | VAE: {vae_model_name}")
 
         # --- Interruption check, passed to the pipeline as a progress callback ---
@@ -133,7 +151,7 @@ class Script(scripts.Script):
             # img2img mode: the diffusion pass is skipped, the input image is upscaled directly
             # Only .interrupted is checked (see check_interruption)
             if shared.state.interrupted:
-                 return Processed(p, [], p.seed, "Interrupted")
+                 return empty_result(p, "Interrupted")
             input_img = p.init_images[0]
 
         # --- Free VRAM ---
@@ -200,7 +218,7 @@ class Script(scripts.Script):
             args.compile_vae = False
 
         except ImportError as e:
-            return Processed(p, [], p.seed, f"Error: {e}")
+            return empty_result(p, f"Error: {e}")
 
         # Image preprocessing: PIL -> [1, H, W, C] float16 tensor
         img_tensor = transforms.ToTensor()(input_img).unsqueeze(0).permute(0, 2, 3, 1).to(dtype=torch.float16)
@@ -327,7 +345,7 @@ class Script(scripts.Script):
             print(f"❌ [SeedVR2 Runtime Error]: {e}")
             import traceback
             traceback.print_exc()
-            return Processed(p, [], p.seed, f"Runtime Error: {e}")
+            return empty_result(p, f"Runtime Error: {e}")
         
         finally:
             if ctx is not None:

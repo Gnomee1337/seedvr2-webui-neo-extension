@@ -28,6 +28,11 @@ Terms in plain words. A new term comes up in conversation — add it here right 
 - **"sharp" variant** — a 7B checkpoint tuned for more detail.
 - **GGUF, Q4_K_M, Q8_0** — a file format for quantized (compressed) weights and its compression levels; less VRAM, slightly lower quality.
 - **fp16 / bf16 / fp8** — number formats of weights; fp8 halves memory against fp16.
+- **Checkpoint header** — the start of a model file that lists tensor names and shapes; read without loading weights.
+  The number of transformer blocks in it (32 or 36) tells 3B from 7B.
+- **Package shadowing** — two extensions ship a Python package with the same name (here `src`); Python uses whichever
+  was imported first for both.
+- **xfail test** — a test that is expected to fail because it reproduces a known, not yet fixed bug.
 - **VAE tiling** — encoding/decoding the image in overlapping tiles to cut VRAM; tile size and overlap are set in the UI.
 - **BlockSwap** — keeping part of the DiT blocks in RAM and moving them to the GPU one by one; slower, needs less VRAM.
 - **Offload** — moving a model or tensors to the CPU when not in use.

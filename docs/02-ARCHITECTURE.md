@@ -20,7 +20,7 @@ The source of truth is the code; this document is reconciled with it on every `/
 ```
 <repo root>/                — the extension root (Forge clones it into extensions/)
   scripts/                  — Forge entry point: seedvr2_script.py
-  seedvr2_neo/              — our helpers without Forge/Gradio imports (model folder discovery)
+  seedvr2_neo/              — our helpers without Forge/Gradio imports (model folder discovery, `src` package check)
   tests/                    — pytest, mirrors seedvr2_neo/ and src/; pytest.ini lives here
   src/                      — vendored SeedVR2 pipeline (ComfyUI-SeedVR2_VideoUpscaler v2.5.24)
     common/                 — config loading, diffusion samplers/schedules/timesteps, seed, cache, distributed stubs
@@ -67,6 +67,8 @@ None of its own: the UI lives inside the txt2img / img2img tabs.
 ### seedvr2_neo/
 - `model_discovery.py` — `scan_models(models_path, extension_root)` → `ModelScan` (absolute folder, DiT and VAE file
   names, defaults); the user-facing note for missing models; the reason a selection cannot run. No Forge imports.
+- `package_check.py` — `describe_shadowed_package(package, extension_root)`: error text when the imported `src` package
+  is another extension's, checked by `run()` before any work.
 
 ### src/core/
 - `generation_utils.py` — `setup_generation_context` (devices, dtype), `prepare_runner`, `compute_generation_info`, `load_text_embeddings`.

@@ -58,8 +58,12 @@ points, never loaded by Forge; they are kept untouched so `diff -r` against upst
 
 ### Models live in Forge's `models/SeedVR2`; the extension's own `models/` is only a fallback
 Why: the owner's choice — users keep all models in one place, and it survives reinstalling the extension. The folder comes
-from `shared.models_path` (follows `--model-ref` / `--data-dir`), never from the working directory. A candidate folder
-without model files is skipped, so an empty folder in one place does not hide models in the other.
+from `shared.models_path` (follows `--model-ref` / `--data-dir`), never from the working directory. The first candidate
+holding both a DiT and a VAE wins, so a stray or partial set in one place does not hide a full set in the other.
+
+### Our `src` must be the one Python loaded; otherwise the run stops with a one-line error
+Why: other SeedVR2 ports also ship a top-level `src`; whichever is imported first is reused, and theirs lacks our local
+patches. Renaming the package is the real fix (B04); until then `run()` checks `src.__file__` before any work.
 
 ### 3B or 7B is read from the checkpoint header, not from the file name
 Why: users rename files; a 7B built with the 3B config fails with a shape error. Block count (32 / 36) in the header is

@@ -89,6 +89,20 @@ Gradio `4.40.0`. Gradio 4: an event handler may return `gr.update(choices=..., v
 `models/SeedVR2` folder in Neo. A case-insensitive search for "seedvr" over `modules/`, `modules_forge/` and `backend/`
 of a local `neo` checkout finds nothing: Neo neither uses nor reserves such a folder.
 
+## Script loading, results and saved UI values
+- **`sys.path`:** `load_scripts` prepends every extension root (`ScriptFile.basedir`) to `sys.path` for good, and while
+  executing each script puts its root first on a temporary list that is replaced by the saved one afterwards. So a
+  script's own `sys.path` edits at import time are discarded, and at run time the extension root is on the path but not
+  necessarily first — a top-level package name shared by two extensions resolves to whichever is imported first.
+  Source: `modules/scripts.py`, `load_scripts`.
+- **Empty `Processed`:** `Processed(p, images_list, seed, info, ..., infotexts=None, ...)`. Normal txt2img shows
+  `processed.info`; only the gallery ✨ (hires upscale) handler reads `processed.infotexts[0]` and splices
+  `processed.images` / `processed.infotexts` into the gallery in place of the selected image. So an empty result needs
+  `infotexts=[message]` to avoid an `IndexError` there, at the cost of one infotext more than images. Source:
+  `modules/processing.py` (`class Processed`), `modules/txt2img.py` (hires button handler).
+- **Saved UI defaults (`ui-config.json`):** a saved dropdown value that is not among the current choices is ignored
+  (`check_dropdown`), so stale model names left by older versions do not break the dropdowns. Source: `modules/ui_loadsave.py`.
+
 ## Not verified
 - Whether `shared.state.skipped` still exists in Neo (used by another extension's interrupt check).
 - Behaviour of the "Extras" postprocessing API (`scripts_postprocessing.ScriptPostprocessing`) in Neo — needed for the Extras idea.

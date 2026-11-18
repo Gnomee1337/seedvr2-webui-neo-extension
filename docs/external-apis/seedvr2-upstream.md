@@ -16,8 +16,8 @@ Changes we made to vendored files. Re-apply after every upstream sync. Each is m
   returned first. Why: the upstream scan is relative to the working directory, which in Forge is wherever the launcher
   was started. Test: `tests/src/utils/test_constants.py`.
 - `src/utils/dit_size.py` (new file): reads tensor names from the safetensors / GGUF header and maps the block count
-  (32 / 36) to 3B / 7B; unreadable header → `"7b"` in the name, case-insensitive. Tests: `tests/src/utils/test_dit_size*.py`.
-- `src/core/model_configuration.py`, `create_new_runner` (+ one import): the config folder comes from
+  (32 / 36) to 3B / 7B; unreadable header or another block count → `"7b"` in the name, case-insensitive. Tests: `tests/src/utils/test_dit_size*.py`.
+- `src/core/model_configuration.py`, `_create_new_runner` (+ one import): the config folder comes from
   `choose_dit_size` instead of `"7b" in dit_model`; the chosen size and its source are logged.
 
 ## Common pitfalls
@@ -36,7 +36,7 @@ Changes we made to vendored files. Re-apply after every upstream sync. Each is m
   Source: `src/utils/constants.py`.
 - **Checkpoint layout:** DiT tensor names start with `blocks.<N>.` (`self.blocks` in `src/models/dit_*/nadit.py`); 3B has
   32 blocks, 7B has 36 (`num_layers` in `configs_*/main.yaml`). Checked on the official 3B fp16, 3B fp8 and 7B sharp fp8
-  safetensors; GGUF files not checked yet.
+  safetensors and the 3B Q6_K GGUF (detected as 3B from its header in a live run); 7B GGUF not checked.
 - **Text embeddings** are loaded with `torch.load(..., weights_only=True)` — no pickled code is executed. Source: `src/core/generation_utils.py`.
 
 ## Model files

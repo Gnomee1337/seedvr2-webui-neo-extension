@@ -20,9 +20,13 @@ port [numz/ComfyUI-SeedVR2_VideoUpscaler](https://github.com/numz/ComfyUI-SeedVR
 ## Models
 
 Put the models into `<WebUI root>/models/SeedVR2/` (the folder name may be in any letter case; with
-`--model-ref` / `--data-dir` it is `SeedVR2/` inside your models folder). If that folder has no models,
-`extensions/<this extension>/models/SeedVR2/` is used instead. The folder in use is printed in the console on every run;
-when no models are found, the script panel shows the exact path to put them in.
+`--model-ref` / `--data-dir` it is `SeedVR2/` inside your models folder). If that folder does not hold both a DiT and
+a VAE but `extensions/<this extension>/models/SeedVR2/` does, the extension folder is used instead. Earlier versions looked in the extension folder
+first: if you keep full sets in both places, the WebUI folder is now the one used. The folder in use is printed in the
+console on every run; when no models are found, the script panel shows the exact path to put them in.
+
+Do not install another SeedVR2 extension at the same time: both ship a package named `src`, and if the other one is
+loaded first the run stops with a message naming that extension.
 
 You need:
 

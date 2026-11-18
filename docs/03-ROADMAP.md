@@ -22,14 +22,14 @@ PROGRESS = (sum of weights of ✅ blocks) / (sum of weights of ALL blocks) × 10
 
 ## Summary
 
-**Sum of weights: 23. Closed: 7. PROGRESS: 30%.** (Not yet recounted by `plan-drift-checker` — confirm with `/progress`.)
+**Sum of weights: 23. Closed: 9. PROGRESS: 39%.** (Counted by `plan-drift-checker` on closing B05.)
 
 ## Delivery requirements (REQ-1…REQ-6, details — `docs/01-VISION.md`)
 
 | # | Block | Req. | Weight | Status | What remains |
 |---|---|---|---|---|---|
 | B04 | Repo hygiene: `.pyc` out of git, unused import, `requirements.txt`, LICENSE + attribution, `src` package name | REQ-5 | 2 | ⬜ | everything except the UTF-8 `.gitignore` |
-| B05 | Install and model discovery: one model folder resolved in one place, refresh button, empty-folder message, model size not by file name | REQ-1 | 2 | ⬜ | all |
+| B05 | Install and model discovery: one model folder resolved in one place, refresh button, empty-folder message, model size not by file name | REQ-1 | 2 | ✅ | — |
 | B06 | VRAM and RAM lifecycle: unload SeedVR2 after run, real Force Reload, release reserved VRAM between phases, Forge device, context reset on error, BlockSwap/offload in the UI and a 7B warning on 8 GB GPUs | REQ-3, REQ-4 | 4 | ⬜ | all |
 | B07 | Correct results: every image of a batch (not the grid), RGB conversion, infotext, respect save settings, empty-result guard | REQ-2 | 3 | ⬜ | all |
 | B09 | Tests with Forge stubs + GitHub Actions (ruff + pytest) | REQ-6 | 3 | ⬜ | all |
@@ -51,7 +51,7 @@ PROGRESS = (sum of weights of ✅ blocks) / (sum of weights of ALL blocks) × 10
 ## How to check the sum
 Add up the "Weight" column across all tables — it must match "Sum of weights" in "Summary":
 B04 2 + B05 2 + B06 4 + B07 3 + B09 3 + B08 2 + B01 3 + B02 3 + B03 1 = **23**.
-Add up the weights of ✅ rows — that is "Closed": B01 3 + B02 3 + B03 1 = **7**.
+Add up the weights of ✅ rows — that is "Closed": B01 3 + B02 3 + B03 1 + B05 2 = **9**.
 
 ## Why this order
 B05 first: a wrong model folder leaves users with empty dropdowns, the most common first-run failure. B04 is small and

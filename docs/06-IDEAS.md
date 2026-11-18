@@ -23,6 +23,11 @@ Do after: B09 (tests catch regressions). Questions for the owner: how often do y
 Options: a "Download" button next to the DiT dropdown (weight 2, recommended); download on first run (weight 1, surprises users with
 multi-GB downloads). Questions for the owner: is network access from the extension acceptable?
 
+## Several model folders
+Now one folder is used: `<models_path>/SeedVR2`, else the extension's `models/SeedVR2`. Options: list both folders'
+models in one dropdown with the folder shown (weight 2); read Forge's extra model paths, if Neo has them (weight 2, needs
+a fact check first). Questions for the owner: does anyone keep SeedVR2 models outside one folder?
+
 ## Image tiling for very large outputs
 VAE tiling cuts VRAM for encode/decode, but the DiT still sees the whole image. Splitting the image into overlapping tiles with
 feather blending (as `tiling.py` in the related project) allows 4K+ outputs on 12–16 GB (weight 3). Do after: B06.

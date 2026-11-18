@@ -22,8 +22,10 @@ The source of truth is the code.
 **Trigger:** Forge builds the txt2img and img2img tabs (startup, "Reload UI"); the 🔄 button; every run.
 `Script.ui()` / `Script._refresh_models()` in `scripts/seedvr2_script.py`, `scan_models` in `seedvr2_neo/model_discovery.py`.
 
-1. Model folder: `SeedVR2` (any letter case) inside Forge's `shared.models_path`, if it holds a model file; otherwise
-   the same inside `<extension>/models/`; otherwise none. Absolute path, resolved again on every scan.
+1. Model folder. Candidates in order: every letter-case spelling of `SeedVR2` inside Forge's `shared.models_path`
+   (exact spelling first), then the same inside `<extension>/models/`. The first candidate with both a DiT and a VAE is
+   used; if none is complete, the first with any model file; otherwise none. Absolute path with the folder's real
+   spelling, resolved again on every scan.
 2. Files ending in `.gguf` / `.safetensors` (exact lower case) are listed, sorted. Names containing `vae` → VAE dropdown,
    the rest → DiT dropdown. Default VAE — the one containing `ema_vae_fp16`.
 3. If no folder, no DiT or no VAE is found, a note under the dropdowns names the folder to put files in.
@@ -37,9 +39,9 @@ The source of truth is the code.
 ## 3. txt2img + SeedVR2  🟡
 **Trigger:** Generate in txt2img with the script selected. `Script.run()`.
 
-0. Models are rescanned (process 2). No folder, nothing selected, or a selected file not in the folder → one line in the
-   console and an empty result with `SeedVR2: <reason>`; no base image is generated. Otherwise the folder and file names
-   are printed.
+0. Models are rescanned (process 2). No folder, no DiT or VAE in it, nothing selected, a selected file not in the folder,
+   or another extension's `src` package loaded instead of ours → one line in the console and an empty result with
+   `SeedVR2: <reason>` (also as its infotext); no base image is generated. Otherwise the folder and file names are printed.
 1. Remove this script from `p.scripts.scripts`, call `processing.process_images(p)` (normal generation with all
    other extensions, images saved as usual), put the script back.
 2. If interrupted — return the base result. Take `processed_base.images[0]` (with batch > 1 and grids enabled this is the grid).

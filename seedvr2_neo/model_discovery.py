@@ -62,15 +62,21 @@ def scan_models(models_path: str, extension_root: str) -> ModelScan:
 def find_model_folder(models_path: str, extension_root: str) -> Optional[str]:
     """Return the absolute model folder, or None when no candidate holds a model file.
 
-    Forge's models folder comes first (it is where users keep their other models);
-    the extension's own `models/` is the fallback. A folder without model files is skipped,
-    so an empty `SeedVR2` folder in one place does not hide models in the other.
+    Candidates in order: Forge's models folder (where users keep their other models), then the
+    extension's own `models/`; inside each, every letter-case spelling of `SeedVR2`. The first
+    folder holding both a DiT and a VAE wins, so a stray file in one place does not hide a full set
+    in another; if none is complete, the first folder with any model file is used and the note
+    names what is missing.
     """
-    for parent in _candidate_parents(models_path, extension_root):
-        folder = find_subfolder_ignoring_case(parent, MODEL_FOLDER_NAME)
-        if folder and list_model_files(folder):
-            return os.path.abspath(folder)
-    return None
+    folders_with_models = [
+        folder
+        for parent in _candidate_parents(models_path, extension_root)
+        for folder in find_subfolders_ignoring_case(parent, MODEL_FOLDER_NAME)
+        if list_model_files(folder)
+    ]
+    complete = next((folder for folder in folders_with_models if _has_both_kinds(folder)), None)
+    chosen = complete or next(iter(folders_with_models), None)
+    return os.path.abspath(chosen) if chosen else None
 
 
 def expected_model_folder(models_path: str) -> str:
@@ -78,23 +84,19 @@ def expected_model_folder(models_path: str) -> str:
     return os.path.abspath(os.path.join(models_path, MODEL_FOLDER_NAME))
 
 
-def find_subfolder_ignoring_case(parent: str, name: str) -> Optional[str]:
-    """Find `parent/name` with any letter case, so Linux finds `seedvr2` like Windows does.
+def find_subfolders_ignoring_case(parent: str, name: str) -> list[str]:
+    """Every `parent/<name in any letter case>` folder, so Linux finds `seedvr2` like Windows does.
 
-    The exact spelling wins; among other spellings the alphabetically first one is used.
+    The exact spelling comes first, the rest alphabetically. Names come from the directory listing,
+    so the path shown to the user has the folder's real spelling.
     """
-    exact = os.path.join(parent, name)
-    if os.path.isdir(exact):
-        return exact
     try:
-        entries = sorted(os.listdir(parent))
+        entries = os.listdir(parent)
     except OSError:
-        return None
-    for entry in entries:
-        path = os.path.join(parent, entry)
-        if entry.lower() == name.lower() and os.path.isdir(path):
-            return path
-    return None
+        return []
+    matches = [entry for entry in entries if entry.lower() == name.lower()]
+    ordered = sorted(matches, key=lambda entry: (entry != name, entry))
+    return [os.path.join(parent, entry) for entry in ordered if os.path.isdir(os.path.join(parent, entry))]
 
 
 def list_model_files(folder: str) -> list[str]:
@@ -135,6 +137,8 @@ def find_selection_error(scan: ModelScan, dit_model: Optional[str], vae_model: O
         ("DiT", dit_model, scan.dit_models),
         ("VAE", vae_model, scan.vae_models),
     ):
+        if not available:
+            return f"No {kind} model in {scan.folder}. Add the file and press 🔄."
         if not selected:
             return f"No {kind} model selected."
         if selected not in available:
@@ -144,6 +148,11 @@ def find_selection_error(scan: ModelScan, dit_model: Optional[str], vae_model: O
 
 def _candidate_parents(models_path: str, extension_root: str) -> Iterable[str]:
     return (models_path, os.path.join(extension_root, "models"))
+
+
+def _has_both_kinds(folder: str) -> bool:
+    kinds = {is_vae_model(name) for name in list_model_files(folder)}
+    return kinds == {True, False}
 
 
 def _missing_kinds(scan: ModelScan) -> list[str]:

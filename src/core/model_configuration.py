@@ -701,9 +701,10 @@ def _create_new_runner(
         dit_model: DiT model filename (determines config selection)
                   - 36 transformer blocks in the checkpoint header → configs_7b/main.yaml
                   - 32 blocks → configs_3b/main.yaml
-                  - header unreadable → "7b" in the name (case-insensitive) as upstream
+                  - header unreadable or another block count → "7b" in the name, case-insensitive
+                    (upstream: case-sensitive)
         vae_model: VAE model filename (stored for reference, not used in config selection)
-        base_cache_dir: Base directory for model files (not used directly but passed for context)
+        base_cache_dir: Base directory for model files; the DiT file is looked up in it to read its header
         debug: Debug instance for logging and timing
         
     Returns:

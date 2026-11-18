@@ -1,10 +1,21 @@
 """DiT size detection from checkpoint headers (`src/utils/dit_size.py`, a local patch)."""
 import json
+import re
 import struct
+from pathlib import Path
 
 import pytest
 
-from src.utils.dit_size import DitSize, choose_dit_size, read_tensor_names, size_from_tensor_names
+from src.utils.dit_size import (
+    CONFIG_DIR_BY_DIT_SIZE,
+    DIT_SIZE_BY_BLOCK_COUNT,
+    DitSize,
+    choose_dit_size,
+    read_tensor_names,
+    size_from_tensor_names,
+)
+
+REPO_ROOT = Path(__file__).resolve().parents[3]
 
 BLOCKS_3B = 32
 BLOCKS_7B = 36
@@ -77,3 +88,12 @@ def test_metadata_key_is_not_a_tensor(tmp_path):
     path = write_safetensors(tmp_path / "m.safetensors", ["blocks.0.w"])
 
     assert read_tensor_names(str(path)) == ["blocks.0.w"]
+
+
+@pytest.mark.parametrize("block_count, size", sorted(DIT_SIZE_BY_BLOCK_COUNT.items()))
+def test_block_count_matches_num_layers_of_the_chosen_config(block_count, size):
+    config = (REPO_ROOT / CONFIG_DIR_BY_DIT_SIZE[size] / "main.yaml").read_text(encoding="utf-8")
+
+    num_layers = int(re.search(r"^\s*num_layers:\s*(\d+)", config, re.MULTILINE).group(1))
+
+    assert num_layers == block_count

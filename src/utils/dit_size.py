@@ -88,7 +88,9 @@ def _read_gguf_tensor_names(path: str) -> List[str]:
     try:
         return [str(tensor.name) for tensor in reader.tensors]
     finally:
-        del reader  # releases the memory map so the file is not kept open (matters on Windows)
+        # Drops our reference to the memory map; on an exception the traceback would otherwise keep
+        # it alive and the file stays locked on Windows.
+        del reader
 
 
 def _size_from_name(dit_model: str) -> DitSize:
