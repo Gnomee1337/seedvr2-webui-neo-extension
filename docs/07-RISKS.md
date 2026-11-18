@@ -117,6 +117,9 @@ Live-checked on an 8 GB GPU without bf16, 16 GB RAM, 1080px output, VAE tile 512
 - 🟢 R2 (S1×L2) **Empty results carry one infotext and no image** (setup errors, nothing to upscale): with the ✨
   (hires upscale) button the selected image drops out of the gallery (still on disk); in an img2img batch such a file
   shifts the infotexts of later files.
+- 🟢 R2 (S1×L2) **img2img ignores `p.override_settings` except `save_to_dirs`.** Forge applies them only inside
+  `process_images`, which img2img skips; the Batch tab's `save_to_dirs` is passed on explicitly. An API call's
+  `override_settings` (e.g. `samples_format`, `samples_save`) has no effect on the img2img result's saving.
 - 🟢 R2 (S1×L2) **img2img infotext "Seed" is the SeedVR2 seed** (img2img inputs have no seed of their own); "Send to"
   puts it into the seed field. The SeedVR2 keys are not read back into the script's controls (B08 candidate).
 - 🟢 R3 (S1×L3) **Interrupt reacts only between phases** and the Forge progress bar is not updated during SeedVR2.

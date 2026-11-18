@@ -159,10 +159,14 @@ def save_originals(p, inputs: List[Image.Image], details: List[InputDetails]) ->
 
 def save_result_image(p, image: Image.Image, index: int, details: InputDetails, infotext: str, suffix: str) -> None:
     """Save one image next to Forge's own outputs. A failed write is reported and skipped, so the other images are
-    still saved and shown."""
+    still saved and shown.
+
+    Forge applies `p.override_settings` only inside `process_images`, which img2img skips; the img2img Batch tab turns
+    date subfolders off that way, so that one override is passed on here (None = the user's setting)."""
+    save_to_dirs = (getattr(p, "override_settings", None) or {}).get("save_to_dirs")
     try:
         images.save_image(image, p.outpath_samples, "", details.seed, details.prompt, shared.opts.samples_format,
-                          info=infotext, p=p, suffix=suffix)
+                          info=infotext, p=p, suffix=suffix, save_to_dirs=save_to_dirs)
     except (OSError, ValueError) as e:
         print(f"❌ [SeedVR2] Cannot save image {index + 1}: {type(e).__name__}: {e}")
 
