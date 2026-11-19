@@ -22,7 +22,8 @@ PROGRESS = (sum of weights of ✅ blocks) / (sum of weights of ALL blocks) × 10
 
 ## Summary
 
-**Sum of weights: 24. Closed: 21. PROGRESS: 87%.** (B10 added by the owner after B09 closed at 91%; the project grew.)
+**Sum of weights: 32. Closed: 21. PROGRESS: 65%.** (B09 closed at 91%; then the owner added B10, B11, B12 and grew B08 —
+the project grew, it did not go backwards.)
 
 ## Delivery requirements (REQ-1…REQ-6, details — `docs/01-VISION.md`)
 
@@ -39,7 +40,9 @@ PROGRESS = (sum of weights of ✅ blocks) / (sum of weights of ALL blocks) × 10
 
 | # | Block | Weight | Status | What remains |
 |---|---|---|---|---|
-| B08 | Settings and feedback: color-correction and attention-mode choice, Forge progress bar, interrupt inside the DiT step, title without "(24G)" | 2 | ⬜ | all |
+| B11 | Output size: a scale factor (slider ×1.0–×4.0, step 0.1, quick ×1.5 / ×2 / ×4) and a long-edge mode in px (2K = 2048; 4K = 3840 only after a live measurement on 8 GB); the shortest-edge mode stays and stays the default (1080 px); resolution worked out per group of same-sized images; new arguments appended at the end of `script_args`; no 6K/8K until B12 | 2 | ⬜ | all |
+| B08 | Settings and feedback: color-correction and attention-mode choice, Forge progress bar, interrupt inside the DiT step, title without "(24G)"; a simple main UI (model and size on top, the rest in Advanced); GPU profiles (8 / 12 / 24 GB) that fill in tile size and BlockSwap, visible and editable | 3 | ⬜ | all |
+| B12 | DiT tiling: the image split into overlapping tiles with feather blending, so 4K+ outputs fit on 8 GB; then 6K/8K in B11's long-edge mode. Quality across tile seams to be measured live | 5 | ⬜ | all |
 
 ## Foundation
 
@@ -51,7 +54,7 @@ PROGRESS = (sum of weights of ✅ blocks) / (sum of weights of ALL blocks) × 10
 
 ## How to check the sum
 Add up the "Weight" column across all tables — it must match "Sum of weights" in "Summary":
-B04 2 + B05 2 + B06 4 + B07 3 + B09 3 + B10 1 + B08 2 + B01 3 + B02 3 + B03 1 = **24**.
+B04 2 + B05 2 + B06 4 + B07 3 + B09 3 + B10 1 + B11 2 + B08 3 + B12 5 + B01 3 + B02 3 + B03 1 = **32**.
 Add up the weights of ✅ rows — that is "Closed": B01 3 + B02 3 + B03 1 + B04 2 + B05 2 + B06 4 + B07 3 + B09 3 = **21**.
 
 ## Why this order
@@ -59,4 +62,5 @@ B05 first: a wrong model folder leaves users with empty dropdowns, the most comm
 before real changes. B06 and B07 are the main user-visible problems (7B unusable on 8 GB and memory held after a run —
 B06; wrong image in batches — B07).
 B09 can start in parallel with B06/B07 — the script logic is easier to fix with tests around it. B10 before B08: it
-removes the top risk with one setting, while B08 is polish.
+removes the top risk with one setting, while B08 is polish. B11 before B08: B08 rearranges the UI around the size
+control. B12 last: the largest and riskiest, and only big outputs need it.

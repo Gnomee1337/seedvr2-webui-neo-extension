@@ -169,5 +169,10 @@ value either wastes speed or still overflows. The note recommends 16 blocks, the
 allocators (34–42 s). BlockSwap on also moves the VAE to RAM during the DiT step: when VRAM is short, the idle VAE
 should not hold it. The note's threshold (11 GiB) is the 7B fp8 weights (~7.9 GB) plus activations at 1080p.
 
+### No 6K / 8K output sizes until the DiT works in tiles
+Why: the DiT sees the whole image; 8K is 33 MP, eight times an output that already takes minutes on an 8 GB GPU, and
+the resolution slider would clamp it silently. Offering it would mislead users. Agreed with the owner; DiT tiling is a
+separate block, after which the larger sizes are added.
+
 ### Fixed pipeline settings: batch 1, LAB color correction, `sdpa`, no `torch.compile`
 Why (*reconstructed from code*): the simplest configuration that works without optional packages.

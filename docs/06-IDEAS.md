@@ -28,13 +28,6 @@ Now one folder is used: `<models_path>/SeedVR2`, else the extension's `models/Se
 models in one dropdown with the folder shown (weight 2); read Forge's extra model paths, if Neo has them (weight 2, needs
 a fact check first). Questions for the owner: does anyone keep SeedVR2 models outside one folder?
 
-## Image tiling for very large outputs
-VAE tiling cuts VRAM for encode/decode, but the DiT still sees the whole image. Splitting the image into overlapping tiles with
-feather blending (as `tiling.py` in the related project) allows 4K+ outputs on 12–16 GB (weight 3). Do after: B06.
-
-## Scale presets (2× / 3× / 4×, long edge)
-Now only "shortest edge" in pixels. Presets relative to the input size are easier for users (weight 1). Part of B08 if taken.
-
 ## Optional attention backends
 SageAttention / FlashAttention are supported in `seedvr2_vendor/` but fixed to `sdpa`. Expose them in "Advanced" when installed (weight 1). Part of B08 if taken.
 

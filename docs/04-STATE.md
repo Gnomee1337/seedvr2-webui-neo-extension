@@ -23,14 +23,19 @@ requirements-dev.txt python -m pytest tests -q` (pulls CPU torch on Windows). CI
 
 ## Completion percentage
 
-**87%** (21 of 24) — B09 closed at 91% (21 of 23), then the owner added B10 (weight 1). 2 blocks open.
+**65%** (21 of 32) — B09 closed at 91% (21 of 23), then the owner added B10 (1), B11 (2), B12 (5) and grew B08 (2 → 3).
+4 blocks open.
 
 ## Next steps
 
 1. B10 — VAE tile 512 as the default (🟠 R9). Agreed with the owner: own block before B08; rename the slider so
    existing users get 512 too (one reset of a hand-set value); Claude does the live re-measure. Assessment:
    `agent-reports/idea-integrator-tile-512-default.md`; fact-check Forge Neo's saved UI values (`ui-config.json`) first.
-2. B08 — settings and feedback (progress bar, interrupt inside the DiT step, SeedVR2 keys read back, title).
+2. B11 — output size: scale factor ×1.0–×4.0 and long edge in px; default stays 1080 px shortest edge; no 6K/8K
+   until B12. Assessment: `agent-reports/idea-integrator-scale-presets.md` (defaults: the factor applies to the final
+   txt2img image, after Hires. fix; inputs under 512 px are raised to 512 with a note).
+3. B08 — settings and feedback, plus a simple main UI and GPU profiles (8 / 12 / 24 GB).
+4. B12 — DiT tiling with feather blending (4K+ on 8 GB), then 6K/8K options.
 
 Agreed with the owner: REQ-1…REQ-6, simplified Git Flow, ComfyUI files kept as in upstream (Forge Neo only),
 hardware target — 8 GB GPU without bf16, the whole repository under Apache-2.0, no grid of upscaled images. The fork is
