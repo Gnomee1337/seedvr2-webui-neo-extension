@@ -115,7 +115,8 @@ prompt was lost). txt2img extends the infotexts Forge built for the base images;
 ### Saving follows "Always save all generated images" and the API's `save_images`; with them off nothing is written
 Why: the user's setting must hold for the upscaled images too. Read from the options (and the request's
 `override_settings`), not `p.save_samples()`, whose skipped flag from the last txt2img batch would stop saving.
-"Save Extra Copy of Original" only adds the img2img input: txt2img base images are saved by Forge by the same rule.
+"Save Extra Copy of Original" only adds the img2img input: txt2img base images are saved by Forge by the same rule
+(the owner left this narrower rule to Claude; earlier it also saved txt2img originals with "Always save" off).
 
 ### API values of the numeric settings are clamped to the slider ranges
 Why: the UI cannot send more than the sliders allow, an API call could (an unbounded resolution means unbounded

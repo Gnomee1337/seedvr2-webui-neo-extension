@@ -31,7 +31,7 @@ Confirmed by the owner. The project is delivered when all requirements are met:
 | # | Requirement | Now |
 |---|---|---|
 | REQ-1 | **Clean install** — on a fresh Forge Neo the extension installs from URL, and both a `.safetensors` and a `.gguf` model upscale without manual `pip` | ✅ ¹ |
-| REQ-2 | **Correct results for every image** — batch size / batch count > 1 in txt2img upscales every image (not the grid); grayscale/RGBA inputs work; the infotext of the result contains the generation parameters | ⬜ |
+| REQ-2 | **Correct results for every image** — batch size / batch count > 1 in txt2img upscales every image (not the grid); grayscale/RGBA inputs work; the infotext of the result contains the generation parameters | ✅ |
 | REQ-3 | **VRAM is given back** — after an upscale the next SD generation on an 8 GB GPU runs without OOM; "Force Reload" really reloads the models | ✅ ² |
 | REQ-4 | **Fits 8 GB GPUs, including ones without bf16** (RTX 20xx / GTX 16xx class) — a 3B GGUF model upscales a 1024px image 2× without OOM and without visible artifacts; if 7B cannot work there, the UI says so instead of failing | ✅ ³ |
 | REQ-5 | **English docs and correct instructions** — README model paths match the code; LICENSE and upstream attribution present | ✅ |
