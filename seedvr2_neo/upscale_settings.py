@@ -43,14 +43,18 @@ MAX_OUTPUT_LONG_EDGE = 3840
 
 
 class SizeMode(str, Enum):
-    """How the output size is chosen; the values are the UI's radio labels and the API's strings."""
+    """How the output size is chosen; the values are the UI's radio labels and the API's strings, in the UI's order."""
 
-    SHORTEST_EDGE = "Shortest edge"
     SCALE_FACTOR = "Scale factor"
+    SHORTEST_EDGE = "Shortest edge"
     LONG_EDGE = "Long edge"
 
 
-DEFAULT_SIZE_MODE = SizeMode.SHORTEST_EDGE
+# The mode the UI starts in.
+DEFAULT_SIZE_MODE = SizeMode.SCALE_FACTOR
+# The mode of an API call that sends no mode or an unknown one: callers written before the modes existed send a
+# shortest edge in px and must keep getting it.
+FALLBACK_SIZE_MODE = SizeMode.SHORTEST_EDGE
 
 
 @dataclass(frozen=True)
@@ -90,7 +94,7 @@ class UpscaleSettings:
     use_tile_vae: bool
     tile_size: int
     tile_overlap: int
-    size_mode: SizeMode = DEFAULT_SIZE_MODE
+    size_mode: SizeMode = FALLBACK_SIZE_MODE
     scale_factor: float = SCALE_FACTOR.default
     long_edge: int = int(LONG_EDGE.default)
 
@@ -119,7 +123,7 @@ def parse_upscale_settings(resolution: Any, input_noise: Any, latent_noise: Any,
                            tile_overlap: Any, size_mode: Any = None, scale_factor: Any = None,
                            long_edge: Any = None) -> UpscaleSettings:
     """Raw values → settings. Out-of-range values are clamped to the slider's range; unreadable ones (text, NaN,
-    None) take the slider's default, an unknown size mode the default mode. The tile overlap is also capped at half
+    None) take the slider's default, a missing or unknown size mode `FALLBACK_SIZE_MODE`. The tile overlap is also capped at half
     the tile size."""
     tile = int(clamp_to_bounds(tile_size, TILE_SIZE))
     return UpscaleSettings(
@@ -138,7 +142,7 @@ def parse_upscale_settings(resolution: Any, input_noise: Any, latent_noise: Any,
 
 
 def parse_size_mode(value: Any) -> SizeMode:
-    """The size mode named by `value` (case and surrounding spaces ignored), or the default mode."""
+    """The size mode named by `value` (case and surrounding spaces ignored), or `FALLBACK_SIZE_MODE`."""
     if isinstance(value, SizeMode):
         return value
     if isinstance(value, str):
@@ -146,7 +150,7 @@ def parse_size_mode(value: Any) -> SizeMode:
         for mode in SizeMode:
             if mode.value.casefold() == wanted:
                 return mode
-    return DEFAULT_SIZE_MODE
+    return FALLBACK_SIZE_MODE
 
 
 def clamp_to_bounds(value: Any, bounds: Bounds) -> float:

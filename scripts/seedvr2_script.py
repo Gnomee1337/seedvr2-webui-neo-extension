@@ -33,7 +33,7 @@ from seedvr2_neo.run_results import InputDetails, RunImage, SavePlan, describe_g
     seedvr2_generation_params
 from seedvr2_neo.size_preview import DEFAULT_RES_STEP, UNKNOWN_SOURCE_NOTE, describe_output_size, txt2img_final_size
 from seedvr2_neo.upscale_run import INTERRUPTED_MESSAGE, HostHooks, UpscaleRequest, UpscaleRun, import_pipeline
-from seedvr2_neo.upscale_settings import DEFAULT_SIZE_MODE, LONG_EDGE, MAX_OUTPUT_LONG_EDGE, NOISE, RESOLUTION, \
+from seedvr2_neo.upscale_settings import DEFAULT_SIZE_MODE, FALLBACK_SIZE_MODE, LONG_EDGE, MAX_OUTPUT_LONG_EDGE, NOISE, RESOLUTION, \
     SCALE_FACTOR, TILE_OVERLAP, TILE_SIZE, USE_TILE_VAE_DEFAULT, Bounds, SizeMode, parse_size_mode, \
     parse_upscale_settings
 
@@ -202,8 +202,6 @@ class Script(scripts.Script):
                                       f"{MAX_OUTPUT_LONG_EDGE} px; no input is upscaled below 512 px")
             # Only the active mode's control is shown. The shortest edge slider keeps its old label so the values
             # users saved still apply.
-            with gr.Column(visible=DEFAULT_SIZE_MODE is SizeMode.SHORTEST_EDGE) as shortest_edge_controls:
-                resolution = gr.Slider(label="Upscale Resolution (Shortest Edge)", **slider_range(RESOLUTION))
             with gr.Column(visible=DEFAULT_SIZE_MODE is SizeMode.SCALE_FACTOR) as scale_factor_controls:
                 with gr.Row(elem_classes=["seedvr2-quick-scale-row"]):
                     scale_factor = gr.Slider(label="Scale Factor", scale=1, **slider_range(SCALE_FACTOR))
@@ -211,6 +209,8 @@ class Script(scripts.Script):
                         gr.Button(value=f"×{factor:g}", size="sm", scale=0, min_width=56,
                                   elem_classes=["seedvr2-quick-scale"]).click(fn=lambda factor=factor: factor,
                                                                               inputs=[], outputs=[scale_factor])
+            with gr.Column(visible=DEFAULT_SIZE_MODE is SizeMode.SHORTEST_EDGE) as shortest_edge_controls:
+                resolution = gr.Slider(label="Upscale Resolution (Shortest Edge)", **slider_range(RESOLUTION))
             with gr.Column(visible=DEFAULT_SIZE_MODE is SizeMode.LONG_EDGE) as long_edge_controls:
                 long_edge = gr.Slider(label="Output Long Edge (px)", **slider_range(LONG_EDGE))
             size_controls = [resolution, size_mode, scale_factor, long_edge]
@@ -219,8 +219,10 @@ class Script(scripts.Script):
                 UNKNOWN_SOURCE_NOTE if txt2img_inputs is None
                 else preview_txt2img_output_size(*(component.value for component in txt2img_inputs)),
                 elem_classes=["seedvr2-size-note"])
+        mode_controls = {SizeMode.SCALE_FACTOR: scale_factor_controls, SizeMode.SHORTEST_EDGE: shortest_edge_controls,
+                         SizeMode.LONG_EDGE: long_edge_controls}
         size_mode.change(fn=self._show_size_controls, inputs=[size_mode],
-                         outputs=[shortest_edge_controls, scale_factor_controls, long_edge_controls])
+                         outputs=[mode_controls[mode] for mode in SizeMode])
         if is_img2img:
             self._preview_img2img_output_size(output_size_note, size_controls)
         elif txt2img_inputs is not None:
@@ -325,10 +327,11 @@ class Script(scripts.Script):
 
     def run(self, p, dit_model_name, vae_model_name, seed, resolution, input_noise, latent_noise, force_reload, unload_sd,
             save_original, use_tile_vae, tile_size, tile_overlap, debug_mode, after_run=AfterRun.UNLOAD.value,
-            blocks_to_swap=0, swap_io_components=False, size_mode=DEFAULT_SIZE_MODE.value,
+            blocks_to_swap=0, swap_io_components=False, size_mode=FALLBACK_SIZE_MODE.value,
             scale_factor=SCALE_FACTOR.default, long_edge=LONG_EDGE.default):
         # Parameters with defaults were added after the first API callers. Forge passes a shorter script_args list
-        # as is, so an older caller gets the behaviour it was written for.
+        # as is, so an older caller gets the behaviour it was written for: a shortest edge in px, although the UI
+        # starts in the scale factor mode.
         # Checked before the base image is generated, so a bad selection costs no generation time
         scan = scan_seedvr2_models()
         setup_error = find_selection_error(scan, dit_model_name, vae_model_name)

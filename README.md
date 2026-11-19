@@ -46,9 +46,10 @@ After adding a model, press 🔄 next to the model dropdowns — no restart need
 Select **SeedVR2 Native Upscaler (24G)** in the **Script** dropdown at the bottom of the txt2img or img2img tab.
 Usually you only need to choose the output size with **Output Size Mode**:
 
-- **Shortest edge** (default) — **Upscale Resolution (Shortest Edge)** in px (1080 by default) for every image.
-- **Scale factor** — ×1.0 to ×4.0 of each image's own size (buttons ×1.5 / ×2 / ×4 next to the slider). In txt2img it
-  applies to the final image, after Hires. fix.
+- **Scale factor** (default, ×2) — ×1.0 to ×4.0 of each image's own size (buttons ×1.5 / ×2 / ×4 next to the
+  slider). In txt2img it applies to the final image, after Hires. fix.
+- **Shortest edge** — **Upscale Resolution (Shortest Edge)** in px (1080 by default) for every image; the mode of
+  earlier versions.
 - **Long edge** — the longest side of each image in px (1024–3840; 2048 is "2K", 3840 is "4K UHD" for 16:9).
 
 In the Scale factor and Long edge modes the long edge never goes above 3840 px (larger sizes need a DiT that works in
@@ -112,8 +113,8 @@ use_tile_vae, tile_size, tile_overlap, debug_mode, after_run, blocks_to_swap, sw
 size_mode, scale_factor, long_edge
 ```
 
-`size_mode` is `"Shortest edge"`, `"Scale factor"` or `"Long edge"`. The last three arguments may be left out: then
-the shortest edge mode is used, as in versions before them. Forge does not fill in other omitted arguments, so send
+`size_mode` is `"Scale factor"`, `"Shortest edge"` or `"Long edge"`. The last three arguments may be left out: then
+the shortest edge mode is used, as in versions before them (the UI starts in "Scale factor"). Forge does not fill in other omitted arguments, so send
 at least the first 13. Numbers outside a slider's range are clamped to it; an unknown `size_mode` means
 `"Shortest edge"`.
 

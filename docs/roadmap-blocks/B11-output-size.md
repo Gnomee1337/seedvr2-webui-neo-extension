@@ -15,11 +15,11 @@ resolution. B08 rearranges the UI around this control, so it goes first.
 1. `seedvr2_neo/upscale_settings.py`: a size mode (Shortest edge / Scale factor / Long edge), bounds for the factor
    (×1.0–×4.0, step 0.1, default ×2.0) and the long edge (px, default 2048, max 3840 or lower after the live check);
    `UpscaleSettings` keeps the mode and its value; one function `size → shortest-edge resolution` for an input size,
-   clamped to `RESOLUTION` (512–3840). Unknown mode / garbage from the API → the default mode / clamped value.
+   clamped to `RESOLUTION` (512–3840). Missing / unknown mode from the API → Shortest edge; garbage numbers → clamped / default.
 2. `seedvr2_neo/run_inputs.py`: `split_into_passes` and `estimate_output_pixels` take the per-size resolution
    instead of one int. `seedvr2_neo/upscale_run.py`: each pass runs with its group's resolution
    (`dataclasses.replace(settings, ...)`), no vendored change (the context is built per pass).
-3. `scripts/seedvr2_script.py`: a Radio "Output Size Mode" (default "Shortest edge"), the factor slider with quick
+3. `scripts/seedvr2_script.py`: a Radio "Output Size Mode" (UI default "Scale factor" ×2, owner's choice; API fallback "Shortest edge"), the factor slider with quick
    ×1.5 / ×2 / ×4 buttons, the long-edge slider; only the active mode's control is visible. The label "Upscale
    Resolution (Shortest Edge)" stays unchanged. New arguments appended at the end of `script_args`. A console line
    with the computed output size per group; a note when an input under 512 px is raised to 512.
@@ -34,7 +34,8 @@ resolution. B08 rearranges the UI around this control, so it goes first.
 
 ## Acceptance criteria
 - [ ] (owner, in the browser) In txt2img and img2img the UI shows "Output Size Mode" with three choices; a fresh install and an existing
-      `ui-config.json` both start in "Shortest edge" with the saved px value (screenshot / UI check).
+      `ui-config.json` both start in "Scale factor ×2"; the shortest-edge slider keeps its saved px value; the size line
+      shows the final size and follows width / height / Hires. fix and the img2img image (UI check).
 - [x] Factor ×2 on a 512×384 img2img input gives 1024×768 (±1 px from even rounding); long edge 2048 on a 16:9 input
       gives 2048×1152 — tests and one live run.
 - [x] img2img with two input sizes in one request: each size gets its own resolution; the pass budget uses it — tests.

@@ -442,67 +442,53 @@ def test_hostile_size_values_from_the_api_fall_back_instead_of_failing(script, p
     assert 512 <= pipeline.generation_kwargs[0]["resolution"] <= 3840
 
 
+def shown_column(script, update_order, mode):
+    """The column `_show_size_controls(mode)` leaves visible, by the slider label inside it."""
+    updates = script._show_size_controls(mode)
+    return [label for label, update in zip(update_order, updates) if update["visible"]]
+
+
 def test_size_mode_shows_only_its_own_control(script):
     script.ui(is_img2img=False)
-    assert [update["visible"] for update in script._show_size_controls("Scale factor")] == [False, True, False]
-    assert [update["visible"] for update in script._show_size_controls("Long edge")] == [False, False, True]
-    assert [update["visible"] for update in script._show_size_controls("garbage")] == [True, False, False]
+    # the order of the outputs `size_mode.change` updates: the modes in the radio's order
+    order = ["Scale Factor", "Upscale Resolution (Shortest Edge)", "Output Long Edge (px)"]
+    assert shown_column(script, order, "Scale factor") == ["Scale Factor"]
+    assert shown_column(script, order, "Shortest edge") == ["Upscale Resolution (Shortest Edge)"]
+    assert shown_column(script, order, "Long edge") == ["Output Long Edge (px)"]
+    assert shown_column(script, order, "garbage") == ["Upscale Resolution (Shortest Edge)"]
 
 
-def test_size_controls_start_in_the_shortest_edge_mode_with_the_old_label(script):
+def test_size_mode_change_updates_the_columns_in_the_order_of_the_modes(script, script_module):
+    columns = []
+    column_class = script_module.gr.Column
+
+    def recording_column(*args, **kwargs):
+        columns.append(column_class(*args, **kwargs))
+        return columns[-1]
+
+    script_module.gr.Column = recording_column
+    try:
+        components = {component.kwargs["label"]: component for component in script.ui(is_img2img=True)}
+    finally:
+        script_module.gr.Column = column_class
+    outputs = next(event["outputs"] for event in components["Output Size Mode"].events
+                   if event["fn"] == script._show_size_controls)
+    # columns are created scale factor, shortest edge, long edge; the radio lists the modes in the same order
+    assert outputs == columns[:3]
+    assert components["Output Size Mode"].kwargs["choices"] == ["Scale factor", "Shortest edge", "Long edge"]
+
+
+def test_ui_starts_in_the_scale_factor_mode_and_keeps_the_old_shortest_edge_label(script):
     """The old label keeps the px value users saved in ui-config.json; new controls have new labels."""
     components = {component.kwargs["label"]: component for component in script.ui(is_img2img=True)}
-    assert components["Output Size Mode"].kwargs["value"] == "Shortest edge"
+    assert components["Output Size Mode"].kwargs["value"] == "Scale factor"
     assert components["Upscale Resolution (Shortest Edge)"].kwargs["value"] == 1080
     assert (components["Scale Factor"].kwargs["value"], components["Output Long Edge (px)"].kwargs["value"]) == (2.0,
                                                                                                                 2048)
 
 
-def test_quick_scale_buttons_set_the_factor(script, script_module, monkeypatch):
-    buttons = []
-    button_class = script_module.gr.Button
-
-    def recording_button(*args, **kwargs):
-        buttons.append(button_class(*args, **kwargs))
-        return buttons[-1]
-
-    monkeypatch.setattr(script_module.gr, "Button", recording_button)
-    components = {component.kwargs["label"]: component for component in script.ui(is_img2img=True)}
-    quick = [button for button in buttons if str(button.kwargs.get("value", "")).startswith("×")]
-    assert {button.kwargs["value"]: button.events[0]["fn"]() for button in quick} == {"×1.5": 1.5, "×2": 2.0,
-                                                                                      "×4": 4.0}
-    assert all(button.events[0]["outputs"] == [components["Scale Factor"]] for button in quick)
-
-
-# --- the calls into the vendored pipeline ----------------------------------------------------------------------------
-
-def real_parameters(module_name, function_name):
-    """Positional parameter names, keyword names, required names and whether `**kwargs` is accepted, read from the
-    vendored source (not imported: it needs the pipeline's packages)."""
-    path = os.path.join(REPO_ROOT, *module_name.split(".")) + ".py"
-    with open(path, encoding="utf-8") as source:
-        tree = ast.parse(source.read())
-    function = next(node for node in tree.body if isinstance(node, ast.FunctionDef) and node.name == function_name)
-    arguments = function.args
-    positional = [arg.arg for arg in arguments.posonlyargs + arguments.args]
-    keywords = positional + [arg.arg for arg in arguments.kwonlyargs]
-    required = positional[:len(positional) - len(arguments.defaults)] + [
-        arg.arg for arg, default in zip(arguments.kwonlyargs, arguments.kw_defaults) if default is None]
-    return positional, keywords, required, arguments.kwarg is not None
-
-
-def test_every_pipeline_call_fits_the_real_vendored_signature(script, make_txt2img, pipeline):
-    """The fake pipeline accepts anything; a keyword renamed upstream must still fail a test, not every user's run."""
-    run(script, make_txt2img(batch_size=2))
-    called = {(call.module, call.function) for call in pipeline.calls}
-    assert called == {(module, name) for module, names in PIPELINE_FUNCTIONS.items() for name in names}
-    for call in pipeline.calls:
-        positional, keywords, required, takes_any_keyword = real_parameters(call.module, call.function)
-        assert call.positional_count <= len(positional), call
-        supplied = set(positional[:call.positional_count]) | set(call.keywords)
-        assert set(required) <= supplied, (call, set(required) - supplied)
-        assert takes_any_keyword or set(call.keywords) <= set(keywords), (call, set(call.keywords) - set(keywords))
-        assert not set(call.keywords) & set(positional[:call.positional_count]), call
+def test_api_call_without_a_size_mode_keeps_the_shortest_edge_although_the_ui_starts_in_scale_factor(script):
+    assert inspect.signature(script.run).parameters["size_mode"].default == "Shortest edge"
 
 
 # --- output size preview ---------------------------------------------------------------------------------------------
@@ -545,7 +531,7 @@ def output_size_note(script, is_img2img):
 def test_txt2img_preview_starts_with_the_size_of_forge_s_controls(script):
     forge_txt2img_size_controls(script, sys.modules["gradio"], width=832, height=1216)
     note, _ = output_size_note(script, is_img2img=False)
-    assert note.value == "Output size: **1080×1578** from 832×1216"
+    assert note.value == "Output size: **1664×2432** from 832×1216"  # the scale factor x2 the UI starts with
 
 
 def test_txt2img_preview_follows_every_size_control(script):

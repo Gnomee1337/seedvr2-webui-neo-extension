@@ -142,10 +142,13 @@ memory). One set of bounds (`seedvr2_neo/upscale_settings.py`) builds the slider
 Why: API callers pass the arguments by position, and Forge passes a shorter list to `run()` as is. Appended
 parameters with Python defaults let an older caller's list keep working; a test checks the order against the UI.
 
-### Output size: three modes, the shortest edge stays the default
+### Output size: three modes, the UI starts in "Scale factor ×2", the API falls back to the shortest edge
 Why: "×2" or "2K wide" had to be worked out by hand for every input size. A scale factor and a long edge in px are
-added; the shortest-edge slider keeps its label and default, so nobody's saved value or API call changes. Each input
-size gets its own resolution (passes are per size anyway). A px long edge, not "2K / 4K" buttons: the names invite
+added; the UI starts in the scale factor mode at ×2 (owner's choice: the most natural way to say how big), listed
+first. An API call that sends no mode or an unknown one gets the shortest edge, so callers written before the modes
+keep their size. The shortest-edge slider keeps its label and default, so its saved value still applies when that
+mode is chosen. Each input size gets its own resolution (passes are per size anyway). The final size is shown under
+the controls before a run. A px long edge, not "2K / 4K" buttons: the names invite
 "8K" next, and "4K" on the shortest edge would give a 6827 px wide 16:9 image. Below 512 px the size is raised to 512,
 not lowered: the slider never went below 512 and smaller sizes are not checked with the model.
 

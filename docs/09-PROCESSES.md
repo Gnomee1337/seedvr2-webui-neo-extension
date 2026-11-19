@@ -32,8 +32,8 @@ The source of truth is the code.
 4. 🔄 rescans and updates both dropdowns and the note; a selected file that is still there stays selected.
 5. Selecting a DiT reads its size from the header (process 5, step 6); a 7B on a CUDA GPU with less than 11 GiB total
    memory shows a note recommending BlockSwap. Unknown size or GPU → no note.
-6. Controls: the size group — output size mode (Shortest edge — default / Scale factor / Long edge) with only the
-   chosen mode's control shown: resolution (shortest edge, 512–3840), scale factor (×1.0–×4.0, quick ×1.5 / ×2 / ×4
+6. Controls: the size group — output size mode (Scale factor — default, ×2 / Shortest edge / Long edge) with only
+   the chosen mode's control shown: resolution (shortest edge, 512–3840), scale factor (×1.0–×4.0, quick ×1.5 / ×2 / ×4
    buttons), long edge (1024–3840 px) — and the output size line; "After run" (Unload SeedVR2 — default / Keep in
    RAM), unload SD; BlockSwap blocks (0–36), BlockSwap I/O layers (BlockSwap is on when either is set);
    "Advanced Settings": seed, save original, force reload, debug logs, input/latent noise, VAE tiling, tile size and
@@ -80,7 +80,7 @@ The source of truth is the code.
 0. Before any generation (process 3, step 1): the numeric settings are read and clamped to the slider ranges
    (`parse_upscale_settings` in `seedvr2_neo/upscale_settings.py`; resolution 512–3840, scale factor 1–4, long edge
    1024–3840, noise 0–1, tile 512–2048, overlap 64–512 and at most half the tile); an unreadable API value takes the
-   slider's default, an unknown size mode means Shortest edge. Omitted size arguments (older API callers) → Shortest edge.
+   slider's default, a missing or unknown size mode means Shortest edge (`FALLBACK_SIZE_MODE`; the UI starts in Scale factor). Omitted size arguments (older API callers) → Shortest edge.
 1. Seed: the UI value, or for `-1` — the first generated image's seed (txt2img), else `p.seed`, else random. One seed
    for all images of the run. A typed seed outside 0 … 2³²−1 (the pipeline also seeds numpy) or not a number counts as
    `-1`, with a console line.
