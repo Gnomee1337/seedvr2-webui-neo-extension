@@ -198,7 +198,8 @@ class Script(scripts.Script):
                 # this label is not "Tile Size" so the 1024 saved by older versions does not override the 512 default.
                 # Do not rename it back; any later label change resets the users' saved value again.
                 tile_size = gr.Slider(label="VAE Tile Size", **slider_range(TILE_SIZE))
-                tile_overlap = gr.Slider(label="Tile Overlap", **slider_range(TILE_OVERLAP))
+                tile_overlap = gr.Slider(label="Tile Overlap", info="At most half the VAE Tile Size is used",
+                                         **slider_range(TILE_OVERLAP))
 
         return [dit_model, vae_model, seed, resolution, input_noise, latent_noise, force_reload, unload_sd, save_original,
                 use_tile_vae, tile_size, tile_overlap, debug_mode, after_run, blocks_to_swap, swap_io_components]

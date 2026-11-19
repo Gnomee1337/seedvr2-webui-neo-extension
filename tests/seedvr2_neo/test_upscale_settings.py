@@ -38,7 +38,7 @@ def test_tile_size_is_clamped(raw, expected):
 
 @pytest.mark.parametrize("raw", ["abc", None, float("nan")])
 def test_unreadable_tile_size_takes_the_512_default(raw):
-    """512 is the size that keeps the VAE phases inside 8 GB of VRAM."""
+    """512 is the size with which the VAE phases finish on 8 GB of VRAM."""
     assert parse(tile_size=raw).tile_size == 512
 
 

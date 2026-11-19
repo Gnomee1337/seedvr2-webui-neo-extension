@@ -171,7 +171,7 @@ should not hold it. The note's threshold (11 GiB) is the 7B fp8 weights (~7.9 GB
 
 ### VAE tile 512 is the default, on a slider labelled "VAE Tile Size"
 Why: with 1024 and `--cuda-malloc` a VAE phase on an 8 GB GPU could run for many minutes; 512/128 is measured clean
-and finishes (07-RISKS, R6). Forge keeps a slider's value in `ui-config.json` under its label and prefers it to the code
+and finishes (07-RISKS, VRAM section). Forge keeps a slider's value in `ui-config.json` under its label and prefers it to the code
 default, so the old label would have left existing users on 1024; the new label resets the tile size once for
 everyone, a value set on purpose included (owner's choice over editing Forge's `ui-config.json` from the extension).
 A fixed value, not a VRAM-based one: the same reasoning as BlockSwap; per-GPU presets are a roadmap item. The overlap

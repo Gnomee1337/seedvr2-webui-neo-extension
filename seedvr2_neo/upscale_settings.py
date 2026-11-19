@@ -24,8 +24,8 @@ class Bounds:
 
 RESOLUTION = Bounds(512, 3840, 1080, 64)
 NOISE = Bounds(0.0, 1.0, 0.0, 0.05)
-# 512 keeps VAE encoding and decoding inside 8 GB of VRAM; with 1024 and `--cuda-malloc` a phase could run for many
-# minutes at full VRAM.
+# 512 lets the VAE phases finish on 8 GB of VRAM (without `--cuda-malloc` with no spill into shared memory); with
+# 1024 and `--cuda-malloc` a phase could run for many minutes at full VRAM.
 TILE_SIZE = Bounds(512, 2048, 512, 128)
 TILE_OVERLAP = Bounds(64, 512, 128, 32)
 USE_TILE_VAE_DEFAULT = True
@@ -63,8 +63,8 @@ def parse_upscale_settings(resolution: Any, input_noise: Any, latent_noise: Any,
         latent_noise=clamp_to_bounds(latent_noise, NOISE),
         use_tile_vae=USE_TILE_VAE_DEFAULT if use_tile_vae is None else parse_flag(use_tile_vae),
         tile_size=tile,
-        # The VAE steps by tile minus overlap: an overlap near the tile size (512 with 512, both slider maximums allow
-        # it) means thousands of tiles and a phase that looks frozen. Half the tile keeps it to a few times the tiles.
+        # The VAE steps by tile minus overlap: an overlap near the tile size (the overlap slider allows 512 next to a
+        # 512 tile) means thousands of tiles and a phase that looks frozen. Half the tile keeps it to a few times the tiles.
         tile_overlap=min(int(clamp_to_bounds(tile_overlap, TILE_OVERLAP)), tile // 2),
     )
 

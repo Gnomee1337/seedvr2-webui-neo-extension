@@ -65,7 +65,7 @@ def test_ui_components_come_in_the_order_of_the_run_parameters(script):
 
 def test_vae_tile_slider_defaults_to_512_under_a_new_label(script):
     """A new label is a new ui-config.json key, so the 1024 that older versions saved under "Tile Size" no longer
-    applies; 512 keeps the VAE phases inside 8 GB of VRAM."""
+    applies; with 512 the VAE phases finish on 8 GB of VRAM."""
     tile_size = next(component for component in script.ui(is_img2img=True)
                      if component.kwargs["label"] == "VAE Tile Size")
     assert (tile_size.kwargs["value"], tile_size.kwargs["minimum"], tile_size.kwargs["maximum"]) == (512, 512, 2048)
@@ -375,7 +375,15 @@ def test_api_values_outside_the_slider_ranges_are_clamped(script, make_txt2img, 
     run(script, make_txt2img(), resolution=99999, tile_size=1, tile_overlap=10**6)
     assert pipeline.generation_kwargs[0]["resolution"] == 3840
     runner = pipeline.runner_kwargs[0]
-    assert runner["encode_tile_size"] == (512, 512) and runner["encode_tile_overlap"] == (256, 256)
+    assert runner["encode_tile_size"] == runner["decode_tile_size"] == (512, 512)
+    assert runner["encode_tile_overlap"] == runner["decode_tile_overlap"] == (256, 256)
+
+
+def test_chosen_tile_size_and_overlap_reach_both_vae_phases(script, make_txt2img, pipeline):
+    run(script, make_txt2img(), tile_size=1024, tile_overlap=256)
+    runner = pipeline.runner_kwargs[0]
+    assert runner["encode_tile_size"] == runner["decode_tile_size"] == (1024, 1024)
+    assert runner["encode_tile_overlap"] == runner["decode_tile_overlap"] == (256, 256)
 
 
 def test_run_accepts_the_arguments_of_an_older_ui(script, make_txt2img):

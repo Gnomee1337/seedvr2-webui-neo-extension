@@ -60,9 +60,9 @@ and a note under the result (API callers: look for `SeedVR2 Error` in `info` →
 reloaded on the next generation.
 
 **VAE Tile Size** (Advanced Settings) defaults to 512 and **Tile Overlap** to 128; the overlap used is at most half
-the tile size. The slider was called "Tile Size" with a default of 1024 until November 2026: after updating from such a
-version it is reset to 512 one time, so a larger value set on purpose (on a 12–24 GB GPU it runs fewer tiles) needs
-setting again.
+the tile size. Older versions had a slider called "Tile Size" with a default of 1024: after updating from one, the tile size is
+reset to 512 one time, so a larger value you had set on purpose needs setting again (on 12–24 GB GPUs a larger tile
+means fewer tiles and a faster VAE).
 
 **After run:** *Unload SeedVR2* (default) frees the SeedVR2 models from VRAM and RAM when the upscale ends;
 *Keep in RAM* keeps them for a faster next run at the cost of system RAM about the size of the two model files
