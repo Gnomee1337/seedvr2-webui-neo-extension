@@ -22,7 +22,7 @@ PROGRESS = (sum of weights of ✅ blocks) / (sum of weights of ALL blocks) × 10
 
 ## Summary
 
-**Sum of weights: 23. Closed: 21. PROGRESS: 91%.** (Counted by `plan-drift-checker` on closing B09.)
+**Sum of weights: 24. Closed: 21. PROGRESS: 87%.** (B10 added by the owner after B09 closed at 91%; the project grew.)
 
 ## Delivery requirements (REQ-1…REQ-6, details — `docs/01-VISION.md`)
 
@@ -33,6 +33,7 @@ PROGRESS = (sum of weights of ✅ blocks) / (sum of weights of ALL blocks) × 10
 | B06 | VRAM and RAM lifecycle: unload SeedVR2 after run, real Force Reload, release reserved VRAM between phases, Forge device, context reset on error, pipeline import before any work (before the base image and the SD unload), BlockSwap/offload in the UI and a 7B warning on 8 GB GPUs | REQ-3, REQ-4 | 4 | ✅ | — |
 | B07 | Correct results: every image of a batch (not the grid), RGB conversion, infotext, respect save settings, empty-result guard | REQ-2 | 3 | ✅ | — |
 | B09 | Tests with Forge stubs + GitHub Actions (pytest) | REQ-6 | 3 | ✅ | — |
+| B10 | VAE tile 512 as the default (closes the tile-1024 stall on 8 GB with `--cuda-malloc`): renamed slider so existing users get it too (Forge's saved UI values — fact-check first), live re-measure by Claude | REQ-4 | 1 | ⬜ | all |
 
 ## UX
 
@@ -50,11 +51,12 @@ PROGRESS = (sum of weights of ✅ blocks) / (sum of weights of ALL blocks) × 10
 
 ## How to check the sum
 Add up the "Weight" column across all tables — it must match "Sum of weights" in "Summary":
-B04 2 + B05 2 + B06 4 + B07 3 + B09 3 + B08 2 + B01 3 + B02 3 + B03 1 = **23**.
+B04 2 + B05 2 + B06 4 + B07 3 + B09 3 + B10 1 + B08 2 + B01 3 + B02 3 + B03 1 = **24**.
 Add up the weights of ✅ rows — that is "Closed": B01 3 + B02 3 + B03 1 + B04 2 + B05 2 + B06 4 + B07 3 + B09 3 = **21**.
 
 ## Why this order
 B05 first: a wrong model folder leaves users with empty dropdowns, the most common first-run failure. B04 removed noise
 before real changes. B06 and B07 are the main user-visible problems (7B unusable on 8 GB and memory held after a run —
 B06; wrong image in batches — B07).
-B09 can start in parallel with B06/B07 — the script logic is easier to fix with tests around it. B08 is polish.
+B09 can start in parallel with B06/B07 — the script logic is easier to fix with tests around it. B10 before B08: it
+removes the top risk with one setting, while B08 is polish.

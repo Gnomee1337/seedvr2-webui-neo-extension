@@ -23,11 +23,13 @@ requirements-dev.txt python -m pytest tests -q` (pulls CPU torch on Windows). CI
 
 ## Completion percentage
 
-**91%** (21 of 23) — counted by `plan-drift-checker` on closing B09. 1 block open.
+**87%** (21 of 24) — B09 closed at 91% (21 of 23), then the owner added B10 (weight 1). 2 blocks open.
 
 ## Next steps
 
-1. Propose via `/idea`: VAE tile 512 as the default (🟠 R9) — it stalls runs on 8 GB GPUs with `--cuda-malloc`.
+1. B10 — VAE tile 512 as the default (🟠 R9). Agreed with the owner: own block before B08; rename the slider so
+   existing users get 512 too (one reset of a hand-set value); Claude does the live re-measure. Assessment:
+   `agent-reports/idea-integrator-tile-512-default.md`; fact-check Forge Neo's saved UI values (`ui-config.json`) first.
 2. B08 — settings and feedback (progress bar, interrupt inside the DiT step, SeedVR2 keys read back, title).
 
 Agreed with the owner: REQ-1…REQ-6, simplified Git Flow, ComfyUI files kept as in upstream (Forge Neo only),
