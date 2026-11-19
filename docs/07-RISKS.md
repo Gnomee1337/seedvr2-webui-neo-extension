@@ -62,6 +62,12 @@ Live-checked on an 8 GB GPU without bf16, 16 GB RAM, 1080px output, VAE tile 512
 3B fp8 — 5–7 s; 7B fp8 with BlockSwap 16 — 34–42 s (780 s without BlockSwap). All gave clean images; after a run with
 "Unload" the GPU drops back to about 0.6 GB used. Between phases the reserved VRAM goes back to ~0.5 GB.
 
+- 🟠 R9 (S3×L3) **VAE tile 1024 (the default) with `--cuda-malloc` can stall a run on 8 GB GPUs.** Live, 3B GGUF Q6_K,
+  1024px shortest edge (img2img 512×384 → 1365×1024): VAE encode or decode ran 6–22+ minutes at full VRAM and 100% GPU
+  without finishing, from a fresh Forge start too, on the old and the new code alike; the same encode once took 9 s
+  after a txt2img run. Without `--cuda-malloc`, at 1080px: encode peak 6.9 GB, 1.3 GB paged (16 s vs 5.7 s with tile
+  512); decode 2.9 GB paged. README recommends 512; the default is unchanged. An interrupt does not stop a running
+  phase (B08). Close: tile 512 as the default, or a VRAM-based default; re-measure on the owner's setup.
 - 🟡 R6 (S2×L3) **With `--cuda-malloc` (cudaMallocAsync) VAE decoding spills into shared memory.** At 1080px with tile
   512 the decode reserves 8.7 GB for a 5.2 GB peak, pages 0.7–2.9 GB and takes 25–137 s; without the flag 6.7 GB
   reserved, no spill, 12.4 s. The flag is opt-in in Forge but common on 8 GB setups; it makes the 7B DiT step faster
@@ -69,8 +75,6 @@ Live-checked on an 8 GB GPU without bf16, 16 GB RAM, 1080px output, VAE tile 512
   VAE decode between tiles, or measure `expandable_segments`.
 - 🟡 R4 (S2×L2) **7B with too few BlockSwap blocks falls off a cliff.** 7B fp8 on 8 GB: 8 blocks fit only with
   `--cuda-malloc` (0 GB free), 4 blocks spill (297 s). Larger outputs need more blocks. The note recommends 16.
-- 🟡 R4 (S2×L2) **VAE tile 1024 (the default) spills on 8 GB GPUs at 1080px.** Encode peak 6.9 GB, 1.3 GB paged
-  (16 s vs 5.7 s with tile 512); decode 2.9 GB paged. README recommends 512; the default is unchanged.
 - 🟡 R4 (S2×L2) **"Keep in RAM" holds the models in system RAM until the next run** (3–4 GB for 3B fp8, ~16 GB for
   7B fp16). Together with Forge's offloaded SD checkpoint a 16 GB system dropped to 0.03–0.7 GB free RAM. Default is
   "Unload SeedVR2"; the option's hint and the README say what it costs. An interrupt before the upscale starts (during
@@ -142,6 +146,9 @@ Live-checked on an 8 GB GPU without bf16, 16 GB RAM, 1080px output, VAE tile 512
   Close: set `ctx['interrupt_fn']` to a Forge check and update `shared.state.job*` from `progress_callback`. (B08)
 
 ## 5. Code hygiene
+- 🟢 R2 (S1×L2) **Upscaled pixels are truncated, not rounded, to 8 bits** (`tensor_to_images` in
+  `seedvr2_neo/upscale_run.py`: `* 255` then `astype(uint8)`): channels come out up to one level darker (a flat 10
+  comes back as 9). Not visible by eye; fix together with a pipeline-output change, not in a refactor.
 - 🟢 R3 (S1×L3) **No CI; `scripts/seedvr2_script.py` has no tests** (needs Forge stubs). Also untested: the
   pipeline import before the base image (checked by code order and a stubbed import check only), and our calls against
   the real `GlobalModelCache` / `validate_blockswap_config` (tests use stand-ins), so an upstream sync can break them
@@ -160,8 +167,9 @@ Live-checked on an 8 GB GPU without bf16, 16 GB RAM, 1080px output, VAE tile 512
   that uses the same names; no check exists. Unlikely with these names.
 
 ## Top risks
-1. 🟡 R6 VAE decode spills with `--cuda-malloc` — section 3.
-2. 🟡 R6 A batch multiplies the `--cuda-malloc` decode spill — section 4.
-3. 🟡 R4 Corrupt GGUF header can hang the WebUI — section 1.
-4. 🟡 R4 7B with too few BlockSwap blocks; VAE tile 1024 spills on 8 GB — section 3.
-5. 🟡 R4 A pass may still need a few GB of RAM (not measured) — section 4.
+1. 🟠 R9 VAE tile 1024 (default) with `--cuda-malloc` can stall a run for many minutes on 8 GB — section 3.
+2. 🟡 R6 VAE decode spills with `--cuda-malloc` — section 3.
+3. 🟡 R6 A batch multiplies the `--cuda-malloc` decode spill — section 4.
+4. 🟡 R4 Corrupt GGUF header can hang the WebUI — section 1.
+5. 🟡 R4 7B with too few BlockSwap blocks — section 3.
+6. 🟡 R4 A pass may still need a few GB of RAM (not measured) — section 4.
