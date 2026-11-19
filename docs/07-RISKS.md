@@ -62,15 +62,12 @@ Live-checked on an 8 GB GPU without bf16, 16 GB RAM, 1080px output, VAE tile 512
 3B fp8 — 5–7 s; 7B fp8 with BlockSwap 16 — 34–42 s (780 s without BlockSwap). All gave clean images; after a run with
 "Unload" the GPU drops back to about 0.6 GB used. Between phases the reserved VRAM goes back to ~0.5 GB.
 
-- 🟠 R9 (S3×L3) **VAE tile 1024 (the default) with `--cuda-malloc` can stall a run on 8 GB GPUs.** Live, 3B GGUF Q6_K,
-  1024px shortest edge (img2img 512×384 → 1365×1024): VAE encode or decode ran 6–22+ minutes at full VRAM and 100% GPU
-  without finishing, from a fresh Forge start too, on the old and the new code alike; the same encode once took 9 s
-  after a txt2img run. Without `--cuda-malloc`, at 1080px: encode peak 6.9 GB, 1.3 GB paged (16 s vs 5.7 s with tile
-  512); decode 2.9 GB paged. README recommends 512; the default is unchanged. An interrupt does not stop a running
-  phase (B08). Close: tile 512 as the default, or a VRAM-based default; re-measure on the owner's setup.
 - 🟡 R6 (S2×L3) **With `--cuda-malloc` (cudaMallocAsync) VAE decoding spills into shared memory.** At 1080px with tile
   512 the decode reserves 8.7 GB for a 5.2 GB peak, pages 0.7–2.9 GB and takes 25–137 s; without the flag 6.7 GB
-  reserved, no spill, 12.4 s. The flag is opt-in in Forge but common on 8 GB setups; it makes the 7B DiT step faster
+  reserved, no spill, 12.4 s. At 1024px shortest edge (img2img 512×384 → 1364×1024, 3B GGUF Q6_K, tile 512/128): decode
+  68–77 s with the flag, 15.7 s without; encode 12–14 s either way; the whole run 128 s vs 68 s, peak 7.8–7.9 GB used.
+  With the old default tile 1024 the same case could run 6–22+ minutes without finishing — the reason 512 is the
+  default. The flag is opt-in in Forge but common on 8 GB setups; it makes the 7B DiT step faster
   with few BlockSwap blocks (8 blocks: 21 s vs 122 s). README gives the trade-off. Close: release the cache inside the
   VAE decode between tiles, or measure `expandable_segments`.
 - 🟡 R4 (S2×L2) **7B with too few BlockSwap blocks falls off a cliff.** 7B fp8 on 8 GB: 8 blocks fit only with
@@ -177,13 +174,16 @@ Live-checked on an 8 GB GPU without bf16, 16 GB RAM, 1080px output, VAE tile 512
 - 🟢 R2 (S1×L2) **Same Script title as the original SeedVR2 Forge extension** ("SeedVR2 Native Upscaler (24G)"): with both
   installed the entries look alike, and `run()` matches scripts by title when it removes itself before txt2img. README
   asks to install only one; the title changes in B08.
+- 🟢 R2 (S1×L2) **An API call with a short `script_args` fails with HTTP 500.** Forge replaces the script's slice with
+  the list sent instead of padding it with defaults, so `run()` misses required parameters (`external-apis/forge-neo.md`).
+  API callers have to send all arguments; the error is immediate and nothing runs. Close: defaults for `run()`'s trailing
+  parameters, or an example request in the README (no block yet).
 - 🟢 R1 (S1×L1) **Our top-level package names `seedvr2_neo` / `seedvr2_vendor` can still collide** with a future extension
   that uses the same names; no check exists. Unlikely with these names.
 
 ## Top risks
-1. 🟠 R9 VAE tile 1024 (default) with `--cuda-malloc` can stall a run for many minutes on 8 GB — section 3.
-2. 🟡 R6 VAE decode spills with `--cuda-malloc` — section 3.
-3. 🟡 R6 A batch multiplies the `--cuda-malloc` decode spill — section 4.
-4. 🟡 R4 Corrupt GGUF header can hang the WebUI — section 1.
-5. 🟡 R4 7B with too few BlockSwap blocks — section 3.
-6. 🟡 R4 A pass may still need a few GB of RAM (not measured) — section 4.
+1. 🟡 R6 VAE decode spills with `--cuda-malloc` — section 3.
+2. 🟡 R6 A batch multiplies the `--cuda-malloc` decode spill — section 4.
+3. 🟡 R4 Corrupt GGUF header can hang the WebUI — section 1.
+4. 🟡 R4 7B with too few BlockSwap blocks — section 3.
+5. 🟡 R4 A pass may still need a few GB of RAM (not measured) — section 4.

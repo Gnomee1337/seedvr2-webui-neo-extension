@@ -179,9 +179,11 @@ of a local `neo` checkout finds nothing: Neo neither uses nor reserves such a fo
   - **API defaults come from the code, not from `ui-config.json`.** `create_script_ui_inner` builds `script.api_info` from
     `getattr(control, "value")` at script-UI creation, and `ui.py` creates the script UI (`scripts_txt2img.setup_ui()`) before
     `UiLoadsave.add_block` runs; `init_default_script_args` (`modules/api/api.py`) fills each script's slice with
-    `[arg.value for arg in script.api_info.args]`. `init_script_args` copies those defaults and overwrites the slice with
-    `request.script_args`; a short list leaves the rest at the code defaults (the order is inferred from the call order in `ui.py`;
-    not confirmed live).
+    `[arg.value for arg in script.api_info.args]` (`/sdapi/v1/script-info` shows them). `init_script_args` copies those
+    defaults and then **replaces** the selected script's slice with `request.script_args`
+    (`script_args[args_from:args_to] = request.script_args`), so a short list is not padded with defaults: `run()` gets
+    only the values sent, and a required parameter left out fails the request with a `TypeError` (HTTP 500; checked live).
+    The code defaults therefore reach `run()` only for the always-on scripts, never for a selected script's omitted args.
   - **Reset by the user:** Settings → "Defaults" tab (`loadsave.create_ui()`, `modules/ui_settings.py`) edits and writes values
     ("View changes", "Apply", applied after a UI restart), or delete the key / the file `ui-config.json` and press "Reload UI"
     (`shared.state.request_restart`). Deleting the file is inferred from the code (a missing file is ignored, `FileNotFoundError`).

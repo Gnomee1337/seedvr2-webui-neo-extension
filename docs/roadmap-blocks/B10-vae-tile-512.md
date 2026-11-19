@@ -26,12 +26,12 @@ removes the top risk with one setting.
 7. Full test run, `/block-done`.
 
 ## Acceptance criteria
-- [ ] `parse_upscale_settings()` with no tile size gives 512; the slider is built with `value=512`, `minimum=512`.
-- [ ] The slider label is "VAE Tile Size"; the tests' label map and the README use it.
-- [ ] Live, `--cuda-malloc` on: the R9 case finishes without a stall; encode and decode times recorded in `07-RISKS.md`.
-- [ ] Live, without `--cuda-malloc`: the same case finishes, times recorded.
-- [ ] Live: with an old `ui-config.json` entry "Tile Size" = 1024, the UI shows "VAE Tile Size" = 512.
-- [ ] R9 removed from `07-RISKS.md`; what remains (decode spill with `--cuda-malloc`) is in R6.
+- [x] `parse_upscale_settings()` with no tile size gives 512; the slider is built with `value=512`, `minimum=512`.
+- [x] The slider label is "VAE Tile Size"; the tests' label map and the README use it.
+- [x] Live, `--cuda-malloc` on: the R9 case finishes without a stall; encode and decode times recorded in `07-RISKS.md`.
+- [x] Live, without `--cuda-malloc`: the same case finishes, times recorded.
+- [x] Live: with an old `ui-config.json` entry "Tile Size" = 1024, the UI shows "VAE Tile Size" = 512.
+- [x] R9 removed from `07-RISKS.md`; what remains (decode spill with `--cuda-malloc`) is in R6.
 - [ ] Full pytest run green; CI green on the branch.
 
 ## Which checks are needed on `/block-done`
@@ -55,8 +55,12 @@ Verified in Neo's source (`external-apis/forge-neo.md`, "Saved UI defaults"):
   per key. So keeping the label "Tile Size" would leave existing users on 1024.
 - Key: `customscript/seedvr2_script.py/<tab>/<label>/<field>`; accordions are not part of it. A new label means a new
   key: the code default applies and is written; the old key stays in the file, ignored, with no warning.
-- API script args omitted or short take the **code** value, not ui-config's, so API callers get 512 either way
-  (order inferred from `ui.py`, checked live in step 6).
+- API defaults (`/sdapi/v1/script-info`) are the **code** values: live, "VAE Tile Size" = 512. A short `script_args`
+  is not padded with them (checked live: HTTP 500, `run()` misses parameters), so API callers send all arguments and
+  are unaffected by the default. Recorded as a 🟢 risk.
+- Live (8 GB, no bf16, 3B GGUF Q6_K, img2img 512×384 → 1364×1024, tile 512/128): with `--cuda-malloc` 128 s (encode
+  12 s, DiT 26 s, decode 68–77 s), without 68 s (14 / 25 / 16 s); both images clean. Forge wrote
+  "VAE Tile Size" = 512 next to the old "Tile Size" = 1024.
 - Unverified: whether a saved value outside a changed range is clamped (not relevant: the range does not change).
 
 ## Open questions

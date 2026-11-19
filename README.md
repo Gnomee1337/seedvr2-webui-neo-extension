@@ -71,8 +71,10 @@ them on every run anyway.
   **BlockSwap: DiT blocks kept in RAM** to **16** (the script shows this hint when a 7B is selected). Measured with
   7B fp8 at 1080px on an 8 GB GPU: the DiT step went from ~13 minutes to 35–42 seconds. Fewer blocks are faster only
   while everything still fits; more blocks use less VRAM and run slower. 3B models need no BlockSwap.
-- **Tile Size 512** (Advanced Settings) instead of 1024 keeps VAE encoding and decoding inside VRAM; with 1024 a
-  1080px image overflowed into shared memory.
+- **VAE Tile Size** (Advanced Settings) is 512 by default, which keeps VAE encoding and decoding inside VRAM; with
+  1024 a 1080px image overflowed into shared memory and, with `--cuda-malloc`, a run could hang for many minutes.
+  Versions before this one had a "Tile Size" slider defaulting to 1024; the renamed slider starts at 512 once, so a
+  value you had set there on purpose needs setting again.
 - **`--cuda-malloc`** in Forge's launch options changes the speed: in the same test, VAE decoding took 12 s without
   it and 25–137 s with it (it reserves more VRAM than the card has), while the 7B DiT step with 8 BlockSwap blocks was
   faster with it (21 s vs 122 s). With 16 blocks both settings are close. If VAE decoding is slow, try launching without it.
