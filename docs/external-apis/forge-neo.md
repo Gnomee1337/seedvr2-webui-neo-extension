@@ -244,6 +244,65 @@ quotes are short fragments).
   `state.job` is a free text ("Batch n out of m"). A script that upscales N images can set `state.job_count` and call `state.nextjob()`
   per image (follows from the fields; not seen in an existing script).
 
+## Names `scripts/seedvr2_script.py` uses (reference for test stubs)
+Source for every line: local `neo` checkout (read in full at the cited file), file named per item. Base URL for the same files:
+`https://raw.githubusercontent.com/Haoming02/sd-webui-forge-classic/neo/`. A stub must match these shapes.
+- **`modules.shared`** (`modules/shared.py`): `models_path` is re-exported from `modules.paths_internal`
+  (`from modules.paths_internal import data_path, extensions_builtin_dir, extensions_dir, models_path, script_path  # noqa: F401`),
+  so `shared.models_path` works (a string path). `opts` and `state` are declared as `None` placeholders in `shared.py` and assigned at
+  startup; `state` is `modules.shared_state.State`. Options read by the script, with defaults (`modules/shared_options.py`):
+  `samples_save` (`True`), `samples_format` (`"png"`), `save_to_dirs` (`True`), `enable_pnginfo` (`True`).
+- **`shared.state`** (`modules/shared_state.py`, class attributes): `skipped=False`, `interrupted=False`, `stopping_generation=False`,
+  `job=""`, `job_no=0`, `job_count=0`, `job_timestamp="0"`. The script reads only `interrupted`.
+- **`modules.devices`** (`modules/devices.py`): `device: torch.device = memory_management.get_torch_device()` (module variable;
+  the script reads `devices.device.type` and passes it to `torch.cuda.get_device_properties`); `torch_gc()` takes no arguments and
+  returns nothing (calls `memory_management.soft_empty_cache()`).
+- **`modules.sd_models.unload_model_weights(*args, **kwargs)`**: no arguments needed, returns `None` (body: `unload_all_models()`,
+  `del model_data.sd_model`, `FakeInitialModel()`, `soft_empty_cache()`, `gc.collect()`). Imported by the script as
+  `import modules.sd_models` and called as `modules.sd_models.unload_model_weights()`, so a stub needs the submodule both in
+  `sys.modules` and as an attribute of the `modules` package. The real module imports `torch` at top level.
+- **`modules.images.save_image`** (`modules/images.py:664`): `save_image(image, path, basename, seed=None, prompt=None,
+  extension="png", info=None, short_filename=False, no_prompt=False, grid=False, pnginfo_section_name="parameters", p=None,
+  existing_info=None, forced_filename=None, suffix="", save_to_dirs=None)`. **Returns `(fullfn, txt_fullfn)`**: the full path of the
+  saved image and the path of the text file or `None` (docstring "Returns: (fullfn, txt_fullfn)"; the function ends `return fullfn, txt_fullfn`).
+  Side effects the script relies on: `image.already_saved_as = fullfn` is set on the image passed in; with `save_to_dirs=None`
+  the global `opts.save_to_dirs` decides; `info` is written as `pnginfo[pnginfo_section_name]`; it creates `path` (`os.makedirs`).
+  The script does not use the return value.
+- **`modules.processing.process_images(p) -> Processed`** (`modules/processing.py:797`): one argument; calls `p.scripts.before_process(p)`
+  when `p.scripts is not None`, applies `p.override_settings`.
+- **`modules.processing.Processed.__init__(self, p, images_list, seed=-1, info="", subseed=None, all_prompts=None,
+  all_negative_prompts=None, all_seeds=None, all_subseeds=None, index_of_first_image=0, infotexts=None, comments="",
+  extra_images_list=[])`** (`modules/processing.py:500-501`). It reads from `p`: `prompt`, `negative_prompt`, `subseed_strength`,
+  `comments` (a dict; `"".join(f"{c}\n" for c in p.comments)` iterates its keys), `width`, `height`, `sampler_name`, `cfg_scale`,
+  `steps`, `batch_size`, `restore_faces`, `sd_model_name`, `sd_model_hash`, `sd_vae_name`, `sd_vae_hash`, `seed_resize_from_w/h`,
+  `extra_generation_params`, `styles`, `token_merging_ratio`, `token_merging_ratio_hr`, `eta`, `ddim_discretize`, `s_churn`,
+  `s_tmin`, `s_tmax` (the rest of the constructor was not read), and `opts.CLIP_stop_at_last_layers`, `opts.face_restoration_model`,
+  `state.job_timestamp`. A stub `p` for the real `Processed` needs all of these; a stub `Processed` needs only the
+  fields the script and tests read (`images`, `infotexts`, `info`, `seed`, `index_of_first_image`, `comments`).
+- **`p` (`StableDiffusionProcessing` dataclass, `modules/processing.py:142-234`)** attributes the script touches, with defaults:
+  `outpath_samples=None`, `prompt=""`, `negative_prompt=""`, `seed=-1`, `do_not_save_samples=False`,
+  `override_settings` (set to `{}` in `__post_init__` when empty, so never `None` on a real `p`; the script still guards with `getattr`),
+  `all_seeds=None`, `all_prompts=None` (both `init=False`, set only by `process_images`; `None` in img2img),
+  `comments={}` (a dict, `p.comment(text)` does `self.comments[text] = 1`), `scripts` (a property over `scripts_value`, default `None`;
+  when set it is a `ScriptRunner`, whose `scripts` attribute is a plain `list` that the script removes itself from and appends to).
+  `StableDiffusionProcessingTxt2Img` and `StableDiffusionProcessingImg2Img` both subclass it; img2img adds `init_images: list = None`.
+- **`modules.scripts.Script`** (`modules/scripts.py:58-93`): class attributes `name`, `section`, `filename`, `args_from`, `args_to`,
+  `alwayson=False`, `is_img2img=False`, `tabname=None`, `group=None`. `elem_id(self, item_id)` (line 343) builds the
+  id from `is_img2img`, `self.show(True) == self.show(False)` (tab prefix `txt2img_`/`img2img_` only when equal) and a sanitised
+  `self.title()` (lines 343-349; the final `return` line was not read), so it calls `show` and `title`; a stub must do the same only if a test checks the id. `ScriptRunner.__init__` sets `self.scripts = []` (line 559).
+- **`ToolButton`** (`modules/ui_components.py:17-26`): `ToolButton(value="", *args, elem_classes=None, **kwargs)`, passes
+  `elem_classes=["tool", *elem_classes]` and `value=value` to `gr.Button`. **`FormRow(gr.Row, FormComponent)`** has no `__init__` (lines 43-47).
+- **`tooltip=` keyword on Gradio components:** Gradio 4.40's own constructors do not take it; Neo patches every component class
+  (`repair` in `modules/gradio_extensions.py:129-153`: `__repaired_init__(self, *args, tooltip=None, source=None, ...)` stores it as
+  `self.webui_tooltip`, and unknown kwargs are dropped with a `GradioDeprecationWarning`). So `ToolButton(..., tooltip="...")`
+  is valid inside Forge Neo and a stub of `gradio` components must accept `tooltip` (and `elem_classes`, `elem_id`, `info`,
+  `label`, `choices`, `value`, `visible`, ...), or it will reject a call that works for real.
+- **`gr.update(...)`**, `.click(fn=, inputs=, outputs=)`, `.change(...)` are used by the script on Gradio's components: stubs need
+  `update(**kwargs)` returning a dict-like and event methods that accept `fn`, `inputs`, `outputs`.
+
+- **`torchvision` is present in a Neo install:** `modules/launch_utils.py` installs `torch` and `torchvision` together
+  (`torch_command`, line 288; reinstall check at line 313); `requirements.txt` lists `torch` only. Source: local Neo checkout.
+
 ## Not verified
 - The launch flag name: `backend/args.py` defines `--gpu-device-id`, while a read of `modules/cmd_args.py` showed `--device-id`
   (str); which one Neo's launcher actually accepts, and whether both exist, was not settled.

@@ -32,7 +32,7 @@ PROGRESS = (sum of weights of ✅ blocks) / (sum of weights of ALL blocks) × 10
 | B05 | Install and model discovery: one model folder resolved in one place, refresh button, empty-folder message, model size not by file name | REQ-1 | 2 | ✅ | — |
 | B06 | VRAM and RAM lifecycle: unload SeedVR2 after run, real Force Reload, release reserved VRAM between phases, Forge device, context reset on error, pipeline import before any work (before the base image and the SD unload), BlockSwap/offload in the UI and a 7B warning on 8 GB GPUs | REQ-3, REQ-4 | 4 | ✅ | — |
 | B07 | Correct results: every image of a batch (not the grid), RGB conversion, infotext, respect save settings, empty-result guard | REQ-2 | 3 | ✅ | — |
-| B09 | Tests with Forge stubs + GitHub Actions (ruff + pytest) | REQ-6 | 3 | ⬜ | all |
+| B09 | Tests with Forge stubs + GitHub Actions (pytest) | REQ-6 | 3 | 🔄 | all |
 
 ## UX
 
