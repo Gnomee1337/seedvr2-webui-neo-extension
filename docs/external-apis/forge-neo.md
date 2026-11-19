@@ -171,7 +171,9 @@ of a local `neo` checkout finds nothing: Neo neither uses nor reserves such a fo
     `customscript/seedvr2_script.py/txt2img/VAE Tile Size/value`. `<tab>` is the interface id passed by `loadsave.add_block(interface, ifid)`
     in `modules/ui.py` (`txt2img`, `img2img`); the script prefix comes from `control.custom_script_source =
     os.path.basename(script.filename)` (`ScriptRunner.create_script_ui_inner`, `modules/scripts.py`). `add_block` recurses into
-    containers with the same `path`, so an Accordion/Row/Group label is not part of the key. Components with `label=None` are not
+    containers with the same `path`, so an Accordion/Row/Group label is not part of the key. A component with the attribute
+  `do_not_save_to_config = True` is skipped by `apply_field` (`modules/ui_loadsave.py`): no saved value is applied to it
+  and none is written, so it always starts at its code value. Components with `label=None` are not
     tracked (Buttons use their `value` text). Two components with the same label on one tab share one key (all get the
     saved value; only the first is in `component_mapping`).
   - **Renaming a label** gives a new key, so the new code default applies and is written to the file. The old key is never removed

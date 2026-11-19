@@ -144,10 +144,6 @@ Live-checked on an 8 GB GPU without bf16, 16 GB RAM, 1080px output, VAE tile 512
   each input image" (the run is unaffected). The txt2img line needs Forge's width / height / Hires. fix `elem_id`s;
   without them it stays generic. Not shown before a run: the old Hires. fix behaviour option
   (`use_old_hires_fix_width_height`), where the line assumes the current behaviour.
-- 🟢 R1 (S1×L1) **A size mode saved as a UI default shows the wrong slider at start.** Forge applies a value saved in
-  `ui-config.json` (Settings → Defaults) to "Output Size Mode" after the UI is built, while the columns' visibility comes
-  from the code default, so the shortest-edge slider shows until the mode is clicked again. The run uses the saved mode.
-  Inferred from Forge's `ui_loadsave.py`, not seen live.
 - 🟢 R1 (S1×L1) **A failure note from the second file on is not shown in the img2img Batch tab:** Forge keeps the
   `Processed` (and its comments) of the first file only; each image's infotext still has `SeedVR2 Error`.
 - 🟢 R1 (S1×L1) **A 16-bit grayscale PNG loses its transparency key** (it is scaled correctly, but comes back opaque).

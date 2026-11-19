@@ -569,3 +569,10 @@ def test_img2img_refresh_button_id_matches_the_script_s_javascript(script_module
         source = js.read()
     assert f'"{script_module.IMG2IMG_SIZE_REFRESH_ID}"' in source
     assert "function seedvr2Img2imgPreview" in source
+
+
+def test_size_mode_is_not_saved_in_ui_config_so_it_always_matches_the_visible_slider(script):
+    """Forge skips both saving and applying a component with `do_not_save_to_config` (`modules/ui_loadsave.py`)."""
+    components = {component.kwargs["label"]: component for component in script.ui(is_img2img=False)}
+    assert components["Output Size Mode"].do_not_save_to_config is True
+    assert not getattr(components["Scale Factor"], "do_not_save_to_config", False)

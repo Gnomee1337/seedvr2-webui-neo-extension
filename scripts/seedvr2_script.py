@@ -200,6 +200,10 @@ class Script(scripts.Script):
                                  value=DEFAULT_SIZE_MODE.value,
                                  info="Scale factor and Long edge keep the long edge at most "
                                       f"{MAX_OUTPUT_LONG_EDGE} px; no input is upscaled below 512 px")
+            # Forge would apply a mode saved in ui-config.json after the UI is built, while the visible slider column
+            # comes from the code default: the radio and the slider would disagree. So the mode always starts at the
+            # code default and is never saved; the sliders keep their saved values.
+            size_mode.do_not_save_to_config = True
             # Only the active mode's control is shown. The shortest edge slider keeps its old label so the values
             # users saved still apply.
             with gr.Column(visible=DEFAULT_SIZE_MODE is SizeMode.SCALE_FACTOR) as scale_factor_controls:
