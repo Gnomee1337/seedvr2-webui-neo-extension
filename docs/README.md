@@ -31,7 +31,7 @@ All documents live in `docs/`. The repository root holds only `README.md` (entry
 | Folder | Contents | Required? |
 |---|---|---|
 | `roadmap-blocks/` | Block cards of **open** blocks (`_TEMPLATE.md` is the template). When a block is closed, its card is deleted | yes |
-| `external-apis/` | Facts about external code we depend on: `forge-neo.md` (host WebUI API), `seedvr2-upstream.md` (vendored pipeline and local patches); `_TEMPLATE.md` is the template | yes |
+| `external-apis/` | Facts about external code we depend on: `forge-neo.md` (host WebUI API), `seedvr2-upstream.md` (vendored pipeline and local patches), `github-actions.md` (CI); `_TEMPLATE.md` is the template | yes |
 | `agent-reports/` | Temporary agent reports; on `/block-done` the conclusions go into documents and the reports are deleted | appears on its own |
 
 ⚠️ Do not put materials with personal data into the repository: they cannot be removed from git

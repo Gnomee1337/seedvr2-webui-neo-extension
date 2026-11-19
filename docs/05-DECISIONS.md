@@ -28,6 +28,22 @@ Why: the root holds ComfyUI's package `__init__.py` (ComfyUI-only); with the ini
 A root `conftest.py` hook cannot stop that (hooks for the root come from its parent), and `--rootdir` in `addopts` is ignored.
 Default import mode: importlib mode would register `tests/seedvr2_vendor` as the `seedvr2_vendor` package and hide the real one.
 
+### The Forge script is tested against stand-ins of Forge, Gradio and the pipeline modules
+Why: Forge cannot be installed in pytest. `tests/scripts/forge_stubs.py` copies only the names and signatures the script
+uses, as recorded in `external-apis/forge-neo.md` (a stand-in that drifts from Forge lets tests pass against an API that
+does not exist). The pipeline is replaced in `sys.modules` at the `seedvr2_vendor.*` module level, not inside the script,
+so the tests survive moving code. Tests drive `Script.run()` and check what users get, not internal calls.
+
+### CI runs only pytest; no linter, no required checks on GitHub
+Why: one developer, tests already run before every commit; CI's value is a clean checkout (a file left out of a commit,
+a package missing from `requirements-dev.txt`) and outside pull requests. The owner chose this minimal form.
+Python 3.10 (the lowest supported) and 3.13 (current Forge Neo installs) with CPU torch from the PyTorch index; torch is in `requirements-dev.txt` because the
+script imports it.
+
+### torch is imported in `seedvr2_neo/` only by `upscale_run.py`
+Why: the pipeline run moved out of the script needs tensors; the rest of `seedvr2_neo/` stays free of torch, so its
+tests stay fast and readable. Forge-only things (device, memory release, interrupt flag) come in as `HostHooks`.
+
 ### Branches: simplified Git Flow
 Why: one developer, no versioned releases yet. `main` + short `feature/*` / `fix/*` branches merged back with green CI.
 Switch to full Git Flow when releases are tagged and users pin versions. Agreed with the owner.

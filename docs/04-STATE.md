@@ -2,36 +2,32 @@
 
 ## Where we stopped
 
-**B07 closed** (correct results) on branch `feature/b07-correct-results`; merge into `main` and push wait for the
-owner's consent (`main` reaches users on their next "Check for updates").
+**B09 closed** and merged into `main` with the owner's consent (CI green on Python 3.10 and 3.13).
 
-What B07 changes for users: txt2img upscales every image of a batch (not the grid; no grid of the results), img2img
-every input (Batch tab too); grayscale / palette / 16-bit / CMYK inputs become RGB, transparency kept; each result keeps
-its generation parameters plus `SeedVR2 …` keys (also inside unsaved images); files only with "Always save" on (or the
-API's `save_images`), nothing otherwise; "Save Extra Copy of Original" now saves only img2img inputs; a failed or
-interrupted upscale returns the images as they were with `SeedVR2 Error` and a note; API values clamped to the slider
-ranges; batches run in passes of up to 16 MP of output. New helpers: `seedvr2_neo/run_inputs.py`, `run_results.py`,
-`upscale_settings.py`.
+What B09 changes: no user-visible behavior change. `Script.run()` is tested against stand-ins of Forge, Gradio and the
+pipeline (`tests/scripts/`), including every keyword sent to the vendored pipeline checked against its source; the script
+is split (530 → ~320 lines) into `seedvr2_neo/upscale_run.py` (pipeline run, the only torch user in `seedvr2_neo/`) and
+`run_results.py` (result images); `.github/workflows/tests.yml` runs pytest on every push, Python 3.10 and 3.13, CPU torch
+(owner chose minimal CI: no linter).
 
-Live-checked through Forge's API on an 8 GB GPU without bf16 (3B GGUF): batches with grid, odd image modes, saving
-on/off, interrupt, PNG Info read-back; img2img Batch tab by the owner. Claude runs such checks itself (Forge launched
-with `--api`; private setup in Claude's memory). The owner's local Forge has the extension on test branch `b07-test`.
+Live run (Forge API, 8 GB GPU without bf16, 3B GGUF): txt2img batch of 2 fine; img2img stalled for many minutes in the
+VAE phase — the same on `main`, so recorded as 🟠 R9 (default tile 1024 with `--cuda-malloc`), not a B09 regression.
+The owner's local Forge is on `main`, stopped. For API checks a self-contained SDXL checkpoint is set per request
+(`override_settings`): the owner's selected one needs a separate VAE module.
 
 `seedvr2_vendor/` and the `.pt` embeddings match upstream numz/ComfyUI-SeedVR2_VideoUpscaler `4490bd1`, plus the local
-patches in `external-apis/seedvr2-upstream.md`. Known problems: `07-RISKS.md` (top: VAE decode spills with
-`--cuda-malloc`, multiplied by batches).
+patches in `external-apis/seedvr2-upstream.md`. Known problems: `07-RISKS.md` (top: 🟠 R9 VAE tile 1024 stall).
 
-Tests: 1594 passed, 1 skipped (POSIX-only), 3 xfailed (known bugs / limitations, `07-RISKS.md`). pytest is not
-installed in the system Python; run `uv run --no-project --python 3.10 --with-requirements requirements-dev.txt python -m pytest tests -q`.
-CI: none.
+Tests: 1664 passed, 1 skipped (POSIX-only), 3 xfailed. Run: `uv run --no-project --python 3.10 --with-requirements
+requirements-dev.txt python -m pytest tests -q` (pulls CPU torch on Windows). CI: GitHub Actions on every push.
 
 ## Completion percentage
 
-**78%** (18 of 23) — counted by `plan-drift-checker` on closing B07. 2 blocks open.
+**91%** (21 of 23) — counted by `plan-drift-checker` on closing B09. 1 block open.
 
 ## Next steps
 
-1. B09 — Forge stubs for testing `run()` + CI (also split `scripts/seedvr2_script.py`, ~520 lines).
+1. Propose via `/idea`: VAE tile 512 as the default (🟠 R9) — it stalls runs on 8 GB GPUs with `--cuda-malloc`.
 2. B08 — settings and feedback (progress bar, interrupt inside the DiT step, SeedVR2 keys read back, title).
 
 Agreed with the owner: REQ-1…REQ-6, simplified Git Flow, ComfyUI files kept as in upstream (Forge Neo only),

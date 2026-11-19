@@ -8,11 +8,16 @@ infotexts and saving"), so a failed image comes back as its input instead of dro
 import json
 from dataclasses import dataclass
 from enum import Enum
-from typing import Any, Dict, Generic, List, Mapping, Sequence, TypeVar
+from typing import Any, Dict, Generic, List, Mapping, Optional, Sequence, TypeVar
 
 T = TypeVar("T")
 
 NEGATIVE_PROMPT_LABEL = "Negative prompt: "
+
+# Where Forge keeps the infotext inside an image (`image.info`), and why an image came back without upscaling when
+# the run gives no other reason.
+PNG_INFO_KEY = "parameters"
+NOT_UPSCALED_MESSAGE = "not upscaled"
 
 
 class GenerationParam(str, Enum):
@@ -127,6 +132,68 @@ class InputDetails:
     seed: int
     prompt: str
     infotext: BaseInfotext
+
+
+def describe_generated_inputs(seeds: Sequence[int], prompts: Sequence[str], base_infotexts: Sequence[str],
+                              count: int) -> List[InputDetails]:
+    """Seed, prompt and Forge's own infotext of each txt2img image, in Forge's `all_seeds` order (`count` is never
+    more than `len(seeds)`). A missing infotext gives an image with only the SeedVR2 parameters."""
+    return [InputDetails(seeds[index], prompts[index],
+                         BaseInfotext.from_forge(base_infotexts[index] if index < len(base_infotexts) else ""))
+            for index in range(count)]
+
+
+def describe_uploaded_inputs(seed: int, prompt: str, negative_prompt: str, count: int) -> List[InputDetails]:
+    """img2img inputs have no seed or infotext of their own: the SeedVR2 seed and the prompt from the UI."""
+    details = InputDetails(seed, prompt, BaseInfotext.from_prompt(prompt, negative_prompt))
+    return [details] * count
+
+
+@dataclass(frozen=True)
+class ResultImage:
+    """One image of the result as Forge gets it, with its infotext and what its file is named after."""
+
+    image: Any
+    infotext: str
+    details: InputDetails
+    is_upscaled: bool
+
+
+def finish_images(run_images: Sequence[RunImage], details: Sequence[InputDetails], params: Mapping[str, Any],
+                  failure: Optional[str], embed_infotext: bool) -> List[ResultImage]:
+    """One image and one infotext per input, in input order (Forge pairs them by index). Upscaled images carry the
+    SeedVR2 parameters; the others also the reason they were not upscaled. With `embed_infotext` (Forge's "Save text
+    information about generation parameters as chunks to png files") the infotext also goes into the image, where
+    Forge's gallery and API look for it when the image is not saved to disk."""
+    failure_params = failure_generation_params(params, failure or NOT_UPSCALED_MESSAGE)
+    results = []
+    for run_image, input_details in zip(run_images, details):
+        infotext = input_details.infotext.with_params(params if run_image.is_upscaled else failure_params)
+        # Upscaled images are the run's own; inputs and Forge's base images are copied before their info changes
+        image = run_image.image if run_image.is_upscaled else copy_keeping_saved_file(run_image.image)
+        if embed_infotext:
+            image.info[PNG_INFO_KEY] = infotext
+        results.append(ResultImage(image, infotext, input_details, run_image.is_upscaled))
+    return results
+
+
+def not_upscaled_comment(run_images: Sequence[RunImage], failure: Optional[str]) -> Optional[str]:
+    """The result comment when some images come back without upscaling, else None."""
+    not_upscaled = sum(1 for run_image in run_images if not run_image.is_upscaled)
+    if not not_upscaled:
+        return None
+    return (f"SeedVR2: {failure or NOT_UPSCALED_MESSAGE} — {not_upscaled} of {len(run_images)} images returned "
+            f"without upscaling")
+
+
+def copy_keeping_saved_file(image: Any) -> Any:
+    """A copy of a PIL image that still points the gallery to the file Forge already saved (`already_saved_as`), so
+    it serves that file instead of writing a temporary one."""
+    copied = image.copy()
+    saved_as = getattr(image, "already_saved_as", None)
+    if saved_as:
+        copied.already_saved_as = saved_as
+    return copied
 
 
 def format_generation_params(params: Mapping[str, Any]) -> str:

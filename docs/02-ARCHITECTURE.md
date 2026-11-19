@@ -14,14 +14,15 @@ The source of truth is the code; this document is reconciled with it on every `/
 | Database | none |
 | Packages | `install.py` (run by Forge at launch); `requirements.txt` is informational — Forge does not read it |
 | Runtime | inside Forge Neo, on Forge's device (`modules.devices.device`); the vendored bf16 probe still uses `cuda:0` |
-| Tests | `pytest` outside Forge, no GPU (`requirements-dev.txt`: `pytest`, `gguf`); config in `tests/pytest.ini` |
+| Tests | `pytest` outside Forge, no GPU (`requirements-dev.txt`: `pytest`, `gguf`, `numpy`, `pillow`, CPU `torch` + `torchvision`); config in `tests/pytest.ini`; CI — `.github/workflows/tests.yml` (pytest on every push and pull request, Python 3.10, CPU torch) |
 
 ## Folders
 ```
 <repo root>/                — the extension root (Forge clones it into extensions/)
   scripts/                  — Forge entry point: seedvr2_script.py
-  seedvr2_neo/              — our helpers without Forge/Gradio imports (model folder discovery)
-  tests/                    — pytest, mirrors seedvr2_neo/ and seedvr2_vendor/; pytest.ini lives here
+  seedvr2_neo/              — our helpers without Forge/Gradio imports (models, memory, inputs, the pipeline run, results)
+  tests/                    — pytest, mirrors scripts/, seedvr2_neo/ and seedvr2_vendor/; pytest.ini lives here
+  .github/workflows/        — CI: tests.yml
   seedvr2_vendor/           — vendored SeedVR2 pipeline (ComfyUI-SeedVR2_VideoUpscaler v2.5.24; upstream folder `src/`)
     common/                 — config loading, diffusion samplers/schedules/timesteps, seed, cache, distributed stubs
     core/                   — generation phases, runner/model configuration, model loading, global model cache, inference
@@ -43,9 +44,9 @@ The source of truth is the code; this document is reconciled with it on every `/
 | What | How in this project |
 |---|---|
 | All tests / one area | `python -m pytest tests` / `python -m pytest tests/seedvr2_neo` (from the repository root) |
-| Test layout | `tests/` mirrors `seedvr2_neo/` and `seedvr2_vendor/`; no `__init__.py` in test folders, default import mode, so test file names must be unique. Planned: `tests/scripts/` with Forge modules (`modules.*`) stubbed in `tests/conftest.py` |
+| Test layout | `tests/` mirrors `scripts/`, `seedvr2_neo/` and `seedvr2_vendor/`; no `__init__.py` in test folders, default import mode, so test file names must be unique. `tests/scripts/`: stand-ins for Gradio, Forge's `modules.*` and the vendored pipeline modules in `forge_stubs.py` (shapes from `external-apis/forge-neo.md`), put into `sys.modules` by `conftest.py`, which imports the script afresh for every test |
 | Test file / stress scenarios file name | `test_<module>.py` / `test_<module>_stress.py` |
-| Linter, formatter | none yet; proposed `ruff` on `scripts/` and new code only (not on vendored `seedvr2_vendor/`) |
+| Linter, formatter | none (CI runs only the tests) |
 
 ## Entry points
 
@@ -62,14 +63,13 @@ None of its own: the UI lives inside the txt2img / img2img tabs.
 ## Modules
 
 ### scripts/
-- `seedvr2_script.py` — the whole Forge integration: UI controls, the model refresh button and the 7B low-VRAM note,
-  the model check and pipeline import before a run, collecting the images to upscale (txt2img base images / img2img
-  inputs), running the four phases on Forge's device with a fresh generation context per group of same-sized images,
-  the process-wide `MODEL_LIFECYCLE`, per-image infotexts and saving (`-seedvr2`, `-original`),
-  interruption via `shared.state.interrupted`.
+- `seedvr2_script.py` — the Forge side: UI controls, the model refresh button and the 7B low-VRAM note, the model
+  check and pipeline import before a run, collecting the images to upscale (txt2img base images / img2img inputs),
+  the SD unload, the process-wide `MODEL_LIFECYCLE`, Forge's hooks for the run (`forge_hooks`: device, memory release,
+  `shared.state.interrupted`), saving (`-seedvr2`, `-original`) and Forge's `Processed`.
 
 ### seedvr2_neo/
-No Forge, Gradio or torch imports; tested outside Forge.
+No Forge or Gradio imports; torch only in `upscale_run.py`. Tested outside Forge.
 - `model_discovery.py` — `scan_models(models_path, extension_root)` → `ModelScan` (absolute folder, DiT and VAE file
   names, defaults); the user-facing note for missing models; the reason a selection cannot run.
 - `memory_plan.py` — `build_memory_plan(after_run, blocks_to_swap, swap_io_components)` → `MemoryPlan` (cache flag,
@@ -86,7 +86,14 @@ No Forge, Gradio or torch imports; tested outside Forge.
 - `run_results.py` — `plan_saving` → `SavePlan`; `read_option` (a Forge option with the request's `override_settings`);
   `GenerationParam` keys and `seedvr2_generation_params` /
   `failure_generation_params`; `merge_run_images` → `RunImage` list (one per input); `BaseInfotext` (prompt part +
-  parameters line, from Forge's infotext or a bare prompt) and `InputDetails` (seed, prompt, base infotext per input).
+  parameters line, from Forge's infotext or a bare prompt) and `InputDetails` (seed, prompt, base infotext per input),
+  built by `describe_generated_inputs` / `describe_uploaded_inputs`; `finish_images` → `ResultImage` list (infotext per
+  image, copies of returned inputs keeping `already_saved_as`, infotext embedded in `image.info`) and
+  `not_upscaled_comment`.
+- `upscale_run.py` (torch, torchvision) — `import_pipeline` (the vendored modules, imported at run time), `UpscaleRequest`,
+  `HostHooks` (device, memory release, interrupt flag from the host), `UpscaleRun.upscale_images` → `UpscaleOutcome`
+  (upscaled images by input index, failure text): passes, the four phases with fresh context, memory release after each
+  phase, interrupt via the progress callback, errors reduced to their type; `images_to_tensor` / `tensor_to_images`.
 
 ### seedvr2_vendor/core/
 - `generation_utils.py` — `setup_generation_context` (devices, dtype), `prepare_runner`, `compute_generation_info`, `load_text_embeddings`.

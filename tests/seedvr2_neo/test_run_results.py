@@ -144,3 +144,71 @@ def test_nothing_upscaled_returns_the_inputs():
 
 def test_indices_outside_the_inputs_are_ignored():
     assert rr.merge_run_images(["a"], {5: "X"}) == [rr.RunImage("a", False)]
+
+
+# --- describe_generated_inputs / describe_uploaded_inputs ---
+
+def test_generated_inputs_take_seed_prompt_and_forge_infotext_by_index():
+    details = rr.describe_generated_inputs([5, 6], ["a", "b"], ["a\nSteps: 20, Seed: 5"], 2)
+
+    assert [(d.seed, d.prompt) for d in details] == [(5, "a"), (6, "b")]
+    assert details[0].infotext == rr.BaseInfotext("a", "Steps: 20, Seed: 5")
+    assert details[1].infotext == rr.BaseInfotext("", "")  # no infotext from Forge: only the SeedVR2 keys later
+
+
+def test_uploaded_inputs_share_the_seedvr2_seed_and_the_ui_prompt():
+    details = rr.describe_uploaded_inputs(42, "a dog", "blurry", 3)
+
+    assert len(details) == 3 and {d.seed for d in details} == {42}
+    assert details[0].infotext.with_params({}) == "a dog\nNegative prompt: blurry"
+
+
+# --- finish_images / not_upscaled_comment / copy_keeping_saved_file ---
+
+class FakeImage:
+    def __init__(self, name):
+        self.name = name
+        self.info = {}
+
+    def copy(self):
+        return FakeImage(self.name + "-copy")
+
+
+def _details(count):
+    return rr.describe_uploaded_inputs(1, "p", "", count)
+
+
+def test_finish_images_gives_one_infotext_per_input_with_the_failure_on_the_inputs_returned():
+    upscaled, returned = FakeImage("up"), FakeImage("in")
+    run_images = [rr.RunImage(upscaled, True), rr.RunImage(returned, False)]
+
+    results = rr.finish_images(run_images, _details(2), {"SeedVR2 Seed": 1}, "Interrupted", embed_infotext=True)
+
+    assert [r.image.name for r in results] == ["up", "in-copy"]  # the input itself is not changed
+    assert results[0].infotext == "p\nSeedVR2 Seed: 1"
+    assert results[1].infotext == "p\nSeedVR2 Seed: 1, SeedVR2 Error: Interrupted"
+    assert [r.image.info[rr.PNG_INFO_KEY] for r in results] == [r.infotext for r in results]
+    assert returned.info == {}
+
+
+def test_finish_images_without_a_reason_says_not_upscaled_and_can_leave_the_image_info_alone():
+    results = rr.finish_images([rr.RunImage(FakeImage("in"), False)], _details(1), {}, None, embed_infotext=False)
+
+    assert results[0].infotext.endswith("SeedVR2 Error: not upscaled")
+    assert results[0].image.info == {}
+
+
+def test_comment_counts_the_images_returned_without_upscaling():
+    run_images = [rr.RunImage("a", True), rr.RunImage("b", False), rr.RunImage("c", False)]
+
+    assert rr.not_upscaled_comment(run_images, "Runtime Error: OSError") == \
+        "SeedVR2: Runtime Error: OSError — 2 of 3 images returned without upscaling"
+    assert rr.not_upscaled_comment(run_images[:1], None) is None
+
+
+def test_copy_keeps_the_file_forge_saved():
+    image = FakeImage("in")
+    image.already_saved_as = "outputs/1.png"
+
+    assert rr.copy_keeping_saved_file(image).already_saved_as == "outputs/1.png"
+    assert not hasattr(rr.copy_keeping_saved_file(FakeImage("x")), "already_saved_as")
