@@ -160,6 +160,33 @@ of a local `neo` checkout finds nothing: Neo neither uses nor reserves such a fo
   `modules/processing.py` (`class Processed`), `modules/txt2img.py` (hires button handler).
 - **Saved UI defaults (`ui-config.json`):** a saved dropdown value that is not among the current choices is ignored
   (`check_dropdown`), so stale model names left by older versions do not break the dropdowns. Source: `modules/ui_loadsave.py`.
+  - **Frozen after the first launch.** `UiLoadsave.add_component` → `apply_field` reads `saved_value = self.ui_settings.get(key)`;
+    if it is `None` the component's current code value is written into `ui_settings[key]`, otherwise the saved value is
+    `setattr`-ed onto the component (`setattr(obj, field, saved_value)`), so a saved value beats a changed code default.
+    The file is rewritten at the end of `create_ui` (`modules/ui.py`) only when `ui_settings` differ from the file
+    (`loadsave.dump_defaults()`). Applied to `Slider` (`value`, `minimum`, `maximum`, `step`), `Radio`, `Checkbox`, `Textbox`,
+    `Number`, `Dropdown` (and `visible`); so a changed slider `minimum`/`maximum`/`step` in code is also ignored for existing
+    users. Whether a saved `value` outside a new code range is clamped: not verified.
+  - **Key.** `customscript/<basename of the script file>/<tab>/<label>/<field>`, e.g.
+    `customscript/seedvr2_script.py/txt2img/VAE Tile Size/value`. `<tab>` is the interface id passed by `loadsave.add_block(interface, ifid)`
+    in `modules/ui.py` (`txt2img`, `img2img`); the script prefix comes from `control.custom_script_source =
+    os.path.basename(script.filename)` (`ScriptRunner.create_script_ui_inner`, `modules/scripts.py`). `add_block` recurses into
+    containers with the same `path`, so an Accordion/Row/Group label is not part of the key. Components with `label=None` are not
+    tracked (Buttons use their `value` text). Two components with the same label on one tab share one key (all get the
+    saved value; only the first is in `component_mapping`).
+  - **Renaming a label** gives a new key, so the new code default applies and is written to the file. The old key is never removed
+    (`ui_settings` starts as the loaded file and only gains keys) and no warning is printed (no such code in `ui_loadsave.py`).
+  - **API defaults come from the code, not from `ui-config.json`.** `create_script_ui_inner` builds `script.api_info` from
+    `getattr(control, "value")` at script-UI creation, and `ui.py` creates the script UI (`scripts_txt2img.setup_ui()`) before
+    `UiLoadsave.add_block` runs; `init_default_script_args` (`modules/api/api.py`) fills each script's slice with
+    `[arg.value for arg in script.api_info.args]` (`/sdapi/v1/script-info` shows them). `init_script_args` copies those
+    defaults and then **replaces** the selected script's slice with `request.script_args`
+    (`script_args[args_from:args_to] = request.script_args`), so a short list is not padded with defaults: `run()` gets
+    only the values sent, and a required parameter left out fails the request with a `TypeError` (HTTP 500; checked live).
+    The code defaults therefore reach `run()` only for the always-on scripts, never for a selected script's omitted args.
+  - **Reset by the user:** Settings → "Defaults" tab (`loadsave.create_ui()`, `modules/ui_settings.py`) edits and writes values
+    ("View changes", "Apply", applied after a UI restart), or delete the key / the file `ui-config.json` and press "Reload UI"
+    (`shared.state.request_restart`). Deleting the file is inferred from the code (a missing file is ignored, `FileNotFoundError`).
 
 ## Results, infotexts and saving
 Source for all of this section: `neo` branch, files named per item (read via raw GitHub; the page summariser relayed the code,

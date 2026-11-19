@@ -81,7 +81,7 @@ def make_run(pipeline, interrupted=False):
 
 
 def make_request(tmp_path):
-    settings = parse_upscale_settings(1080, 0.0, 0.0, True, 1024, 128)
+    settings = parse_upscale_settings(1080, 0.0, 0.0, True, 512, 128)
     return UpscaleRequest("dit.gguf", "ema_vae_fp16.safetensors", str(tmp_path), build_memory_plan(None, 0, False), 7,
                           settings)
 

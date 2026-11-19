@@ -169,6 +169,16 @@ value either wastes speed or still overflows. The note recommends 16 blocks, the
 allocators (34–42 s). BlockSwap on also moves the VAE to RAM during the DiT step: when VRAM is short, the idle VAE
 should not hold it. The note's threshold (11 GiB) is the 7B fp8 weights (~7.9 GB) plus activations at 1080p.
 
+### VAE tile 512 is the default, on a slider labelled "VAE Tile Size"
+Why: with 1024 and `--cuda-malloc` a VAE phase on an 8 GB GPU could run for many minutes; 512/128 is measured clean
+and finishes (07-RISKS, VRAM section). Forge keeps a slider's value in `ui-config.json` under its label and prefers it to the code
+default, so the old label would have left existing users on 1024; the new label resets the tile size once for
+everyone, a value set on purpose included (owner's choice over editing Forge's `ui-config.json` from the extension).
+A fixed value, not a VRAM-based one: the same reasoning as BlockSwap; per-GPU presets are a roadmap item. The overlap
+is capped at half the tile, so an overlap saved next to the old 1024 tile cannot pair with 512 into a few-pixel stride.
+API callers pass positional `script_args` and are unaffected; a client that maps them by `/sdapi/v1/script-info` label
+must use the new one. Any later default change meets the same `ui-config.json` trap.
+
 ### No 6K / 8K output sizes until the DiT works in tiles
 Why: the DiT sees the whole image; 8K is 33 MP, eight times an output that already takes minutes on an 8 GB GPU, and
 the resolution slider would clamp it silently. Offering it would mislead users. Agreed with the owner; DiT tiling is a

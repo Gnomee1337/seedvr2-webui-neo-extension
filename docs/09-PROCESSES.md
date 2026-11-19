@@ -69,7 +69,7 @@ The source of truth is the code.
 ## 5. SeedVR2 upscale (common part)  🟡
 0. Before any generation (process 3, step 1): the numeric settings are read and clamped to the slider ranges
    (`parse_upscale_settings` in `seedvr2_neo/upscale_settings.py`; resolution 512–3840, noise 0–1, tile 512–2048,
-   overlap 64–512); an unreadable API value takes the slider's default.
+   overlap 64–512 and at most half the tile); an unreadable API value takes the slider's default.
 1. Seed: the UI value, or for `-1` — the first generated image's seed (txt2img), else `p.seed`, else random. One seed
    for all images of the run. A typed seed outside 0 … 2³²−1 (the pipeline also seeds numpy) or not a number counts as
    `-1`, with a console line.
