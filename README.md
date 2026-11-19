@@ -44,14 +44,25 @@ After adding a model, press 🔄 next to the model dropdowns — no restart need
 ## Usage
 
 Select **SeedVR2 Native Upscaler (24G)** in the **Script** dropdown at the bottom of the txt2img or img2img tab.
-Usually you only need to change **Upscale Resolution (Shortest Edge)**.
+Usually you only need to choose the output size with **Output Size Mode**:
+
+- **Shortest edge** (default) — **Upscale Resolution (Shortest Edge)** in px (1080 by default) for every image.
+- **Scale factor** — ×1.0 to ×4.0 of each image's own size (buttons ×1.5 / ×2 / ×4 next to the slider). In txt2img it
+  applies to the final image, after Hires. fix.
+- **Long edge** — the longest side of each image in px (1024–3840; 2048 is "2K", 3840 is "4K UHD" for 16:9).
+
+In the Scale factor and Long edge modes the long edge never goes above 3840 px (larger sizes need a DiT that works in
+tiles, which is not there yet), and no image is made smaller than 512 px on its shortest edge, so ×1 of a small image
+is still an upscale. Images of different sizes in one img2img batch each get their own size. The console shows the
+size of each group, e.g. `[SeedVR2] 2 images 512x384 -> 1024x768`.
 
 - **txt2img** — the images are generated as usual (with all other extensions), then every image of the batch is
   upscaled with SeedVR2 (the grid is not upscaled, and no grid of the results is made).
 - **img2img** — the img2img diffusion pass is skipped; every input image is upscaled with SeedVR2 directly (the
   **Batch** tab works too). Grayscale, palette and 16-bit images become RGB; transparency is kept.
 
-Each result keeps its generation parameters plus `SeedVR2 …` keys (model, VAE, resolution, seed). Files are written
+Each result keeps its generation parameters plus `SeedVR2 …` keys (model, VAE, the shortest edge it was upscaled to,
+seed, size mode with its factor or long edge). Files are written
 like Forge's own: with **Settings → Saving images → Always save all generated images** on, each upscaled image is saved
 with the `-seedvr2` suffix; with it off (or `save_images: false` in an API call) the extension writes no files at all.
 **Save Extra Copy of Original** also saves the img2img input image (`-original`); txt2img images are saved by Forge.
@@ -79,9 +90,29 @@ them on every run anyway.
 - **VAE Tile Size** (Advanced Settings) is 512 by default. Without `--cuda-malloc` that keeps VAE encoding and
   decoding inside VRAM; with 1024 a 1080px image overflowed into shared memory, and with `--cuda-malloc` a run could
   hang for many minutes. With `--cuda-malloc` the decode at 512 still spills somewhat (next point).
+- **Large outputs take minutes.** 3B GGUF, VAE tile 512, 8 GB GPU without bf16: ×2 of a 512×384 image (1024×768)
+  ~50 s; a 16:9 image to 3840×2160 (Long edge 3840) ~8 minutes without `--cuda-malloc` (DiT step 5.7 min, decoding
+  1.5 min) and ~17.5 minutes with it (DiT step 10.5 min, decoding 6.5 min), VRAM full in both cases; the image is clean.
+  For quick results stay at 2048 or below.
 - **`--cuda-malloc`** in Forge's launch options changes the speed: in the same test, VAE decoding took 12 s without
   it and 25–137 s with it (it reserves more VRAM than the card has), while the 7B DiT step with 8 BlockSwap blocks was
   faster with it (21 s vs 122 s). With 16 blocks both settings are close. If VAE decoding is slow, try launching without it.
+
+### API
+
+Send `"script_name": "SeedVR2 Native Upscaler (24G)"` to `/sdapi/v1/txt2img` or `/sdapi/v1/img2img` with
+`script_args` in this order:
+
+```
+dit_model, vae_model, seed, resolution, input_noise, latent_noise, force_reload, unload_sd, save_original,
+use_tile_vae, tile_size, tile_overlap, debug_mode, after_run, blocks_to_swap, swap_io_components,
+size_mode, scale_factor, long_edge
+```
+
+`size_mode` is `"Shortest edge"`, `"Scale factor"` or `"Long edge"`. The last three arguments may be left out: then
+the shortest edge mode is used, as in versions before them. Forge does not fill in other omitted arguments, so send
+at least the first 13. Numbers outside a slider's range are clamped to it; an unknown `size_mode` means
+`"Shortest edge"`.
 
 <img width="1660" height="694" alt="Extension UI" src="https://github.com/user-attachments/assets/777c34e7-aca6-4e51-9994-f02f817311ea" />
 

@@ -1,6 +1,6 @@
 # B11 — Output size: scale factor and long edge
 
-**Status:** ⬜ not started
+**Status:** 🔄 in progress (code, tests, docs, live check done; UI look — owner)
 **Weight:** 2 (from `docs/03-ROADMAP.md`)
 **Decisions this block rests on:** "Same-sized images go through the pipeline in passes of up to 16 MP of output";
 "API values of the numeric settings are clamped to the slider ranges"; "VAE tile 512 is the default, on a slider
@@ -33,17 +33,17 @@ resolution. B08 rearranges the UI around this control, so it goes first.
    "Scale presets" from `06-IDEAS`, `07-RISKS` if anything new.
 
 ## Acceptance criteria
-- [ ] In txt2img and img2img the UI shows "Output Size Mode" with three choices; a fresh install and an existing
+- [ ] (owner, in the browser) In txt2img and img2img the UI shows "Output Size Mode" with three choices; a fresh install and an existing
       `ui-config.json` both start in "Shortest edge" with the saved px value (screenshot / UI check).
-- [ ] Factor ×2 on a 512×384 img2img input gives 1024×768 (±1 px from even rounding); long edge 2048 on a 16:9 input
+- [x] Factor ×2 on a 512×384 img2img input gives 1024×768 (±1 px from even rounding); long edge 2048 on a 16:9 input
       gives 2048×1152 — tests and one live run.
-- [ ] img2img with two input sizes in one request: each size gets its own resolution; the pass budget uses it — tests.
-- [ ] An API call with the old argument list (no new arguments) behaves as today — positional-order test.
-- [ ] Hostile API values for the new arguments are clamped or fall back to the default, never crash — tests.
-- [ ] No mode produces an output long edge above 3840 (or the measured cap) except "Shortest edge", which is unchanged.
-- [ ] Infotext of every result names the resolution actually used for that image and the size mode.
-- [ ] Live numbers (time, clean image) for ×2 and the long-edge maximum on the 8 GB target are in README.
-- [ ] Full test run green; CI green.
+- [x] img2img with two input sizes in one request: each size gets its own resolution; the pass budget uses it — tests.
+- [x] An API call with the old argument list (no new arguments) behaves as today — positional-order test.
+- [x] Hostile API values for the new arguments are clamped or fall back to the default, never crash — tests.
+- [x] No mode produces an output long edge above 3840 (or the measured cap) except "Shortest edge", which is unchanged.
+- [x] Infotext of every result names the resolution actually used for that image and the size mode.
+- [x] Live numbers (time, clean image) for ×2 and the long-edge maximum on the 8 GB target are in README.
+- [ ] Full test run green (1751 passed locally); CI green — after push.
 
 ## Which checks are needed on `/block-done`
 Always: `code-auditor`, `fresh-eyes-reviewer`, `plan-drift-checker`. Additionally (tick what applies):
@@ -72,7 +72,12 @@ B10 closed (done). The owner's local Forge with 3B GGUF for the live check (avai
 - No fact-check run: Gradio 4.40 `Radio`, `.click`, `.change`, `gr.update(visible=...)` and `ui-config.json` are
   already verified in `external-apis/forge-neo.md`.
 
+## Live results (8 GB GPU without bf16, 3B Q6_K GGUF, tile 512)
+- img2img 512×384 ×2 → 1024×768, 51 s with `--cuda-malloc`; ×1.5 of 512×384 + 640×640 → 768×576 + 960×960;
+  16 old arguments (shortest edge 768) → 1024×768, infotext "Shortest edge".
+- txt2img 1024×576 SDXL, Long edge 3840 → 3840×2160, clean: with `--cuda-malloc` 1185 s total (encode 39 s, DiT
+  10.5 min, decode 6.6 min); without it 580 s total (encode 44 s, DiT 5.7 min, decode 1.5 min). VRAM full, no OOM.
+  Long-edge maximum kept at 3840, with the numbers in README.
+
 ## Open questions
-1. Cap the long edge at 3840 in the factor and long-edge modes (×4 on 1024×1536 → 2560×3840, not 3840×5760)?
-   Recommended: yes — consistent with "no 6K/8K until B12". The shortest-edge mode stays as is.
-2. Default factor when the user switches to "Scale factor": ×2.0? Default long edge: 2048?
+- None: the 3840 cap and the ×2.0 / 2048 defaults were agreed with the owner.

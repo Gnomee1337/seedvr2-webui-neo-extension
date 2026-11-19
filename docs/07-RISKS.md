@@ -109,6 +109,10 @@ Live-checked on an 8 GB GPU without bf16, 16 GB RAM, 1080px output, VAE tile 512
 - 🟡 R6 (S2×L3) **With `--cuda-malloc` a batch multiplies the VAE-decode spill** (section 3): live, 3B GGUF, 4 × 512→1024 px,
   tile 512 on an 8 GB GPU — each frame decoded in 90–160 s with VRAM full (vs ~10 s without the flag); the run took
   ~12 min. Not caused by batching, but users with batches feel it most.
+- 🟡 R4 (S2×L2) **A 4K output takes many minutes on an 8 GB GPU.** Live, 3B GGUF, tile 512: one 16:9 image to
+  3840×2160 — ~8 min without `--cuda-malloc`, ~17.5 min with it (DiT step 5.7 / 10.5 min, VRAM full, no OOM, clean
+  image). Scale factor ×3–×4 of a txt2img image after Hires. fix lands there easily. README gives the numbers; the
+  console line names the output size before the run. Faster only with DiT tiling (roadmap).
 - 🟡 R4 (S2×L2) **A pass may still need a few GB of RAM.** Passes are capped at 16 MP of output (`PASS_BUDGET_PIXELS`
   in `seedvr2_neo/run_inputs.py`), but the pipeline keeps its own copies (latents, decoded frames, alpha) per pass;
   peak RAM per pass is not measured. Huge inputs (a decompression bomb through the API) are decoded by Forge before
@@ -135,6 +139,10 @@ Live-checked on an 8 GB GPU without bf16, 16 GB RAM, 1080px output, VAE tile 512
   Forge's fields; B08 candidate). An img2img infotext has the prompt and the SeedVR2 keys, no Forge `Seed`.
 - 🟢 R2 (S1×L2) **`-original` copies and not-upscaled results are the converted input** (8-bit RGB / RGBA), not the
   file as given: a 16-bit, CMYK or palette input loses its original form there. The upscale itself needs the conversion.
+- 🟢 R1 (S1×L1) **A size mode saved as a UI default shows the wrong slider at start.** Forge applies a value saved in
+  `ui-config.json` (Settings → Defaults) to "Output Size Mode" after the UI is built, while the columns' visibility comes
+  from the code default, so the shortest-edge slider shows until the mode is clicked again. The run uses the saved mode.
+  Inferred from Forge's `ui_loadsave.py`, not seen live.
 - 🟢 R1 (S1×L1) **A failure note from the second file on is not shown in the img2img Batch tab:** Forge keeps the
   `Processed` (and its comments) of the first file only; each image's infotext still has `SeedVR2 Error`.
 - 🟢 R1 (S1×L1) **A 16-bit grayscale PNG loses its transparency key** (it is scaled correctly, but comes back opaque).
