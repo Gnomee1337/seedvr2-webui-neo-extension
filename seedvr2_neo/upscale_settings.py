@@ -24,7 +24,9 @@ class Bounds:
 
 RESOLUTION = Bounds(512, 3840, 1080, 64)
 NOISE = Bounds(0.0, 1.0, 0.0, 0.05)
-TILE_SIZE = Bounds(512, 2048, 1024, 128)
+# 512 keeps VAE encoding and decoding inside 8 GB of VRAM; with 1024 and `--cuda-malloc` a phase could run for many
+# minutes at full VRAM.
+TILE_SIZE = Bounds(512, 2048, 512, 128)
 TILE_OVERLAP = Bounds(64, 512, 128, 32)
 USE_TILE_VAE_DEFAULT = True
 

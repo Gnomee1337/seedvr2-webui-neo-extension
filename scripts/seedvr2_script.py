@@ -194,7 +194,9 @@ class Script(scripts.Script):
             gr.Markdown("ℹ️ **Tiling reduces VRAM usage for huge resolutions.**")
             with gr.Row():
                 use_tile_vae = gr.Checkbox(label="Enable VAE Tiling", value=USE_TILE_VAE_DEFAULT)
-                tile_size = gr.Slider(label="Tile Size", **slider_range(TILE_SIZE))
+                # Forge keeps a slider's value in ui-config.json under its label and prefers it to the code default;
+                # this label is not "Tile Size" so the 1024 saved by older versions does not override the 512 default.
+                tile_size = gr.Slider(label="VAE Tile Size", **slider_range(TILE_SIZE))
                 tile_overlap = gr.Slider(label="Tile Overlap", **slider_range(TILE_OVERLAP))
 
         return [dit_model, vae_model, seed, resolution, input_noise, latent_noise, force_reload, unload_sd, save_original,

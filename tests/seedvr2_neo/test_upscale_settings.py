@@ -5,14 +5,14 @@ from seedvr2_neo import upscale_settings as us
 
 
 def parse(**overrides):
-    values = dict(resolution=1080, input_noise=0.0, latent_noise=0.0, use_tile_vae=True, tile_size=1024,
+    values = dict(resolution=1080, input_noise=0.0, latent_noise=0.0, use_tile_vae=True, tile_size=512,
                   tile_overlap=128)
     values.update(overrides)
     return us.parse_upscale_settings(**values)
 
 
 def test_ui_values_pass_unchanged():
-    assert parse() == us.UpscaleSettings(1080, 0.0, 0.0, True, 1024, 128)
+    assert parse() == us.UpscaleSettings(1080, 0.0, 0.0, True, 512, 128)
 
 
 @pytest.mark.parametrize("raw, expected", [(100000, 3840), (100, 512), ("2048", 2048), (1080.7, 1080)])
@@ -34,6 +34,12 @@ def test_noise_is_kept_between_0_and_1(raw, expected):
 @pytest.mark.parametrize("raw, expected", [(0, 512), (99999, 2048)])
 def test_tile_size_is_clamped(raw, expected):
     assert parse(tile_size=raw).tile_size == expected
+
+
+@pytest.mark.parametrize("raw", ["abc", None, float("nan")])
+def test_unreadable_tile_size_takes_the_512_default(raw):
+    """512 is the size that keeps the VAE phases inside 8 GB of VRAM."""
+    assert parse(tile_size=raw).tile_size == 512
 
 
 def test_tile_overlap_is_clamped():

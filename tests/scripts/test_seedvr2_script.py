@@ -50,7 +50,7 @@ RUN_PARAMETER_LABELS = {
     "dit_model_name": "DiT Model", "vae_model_name": "VAE Model", "seed": "Seed (-1 = Random/Follow)",
     "resolution": "Upscale Resolution (Shortest Edge)", "input_noise": "Input Noise Scale",
     "latent_noise": "Latent Noise Scale", "force_reload": "Force Reload", "unload_sd": "Unload SD Checkpoint",
-    "save_original": "Save Extra Copy of Original", "use_tile_vae": "Enable VAE Tiling", "tile_size": "Tile Size",
+    "save_original": "Save Extra Copy of Original", "use_tile_vae": "Enable VAE Tiling", "tile_size": "VAE Tile Size",
     "tile_overlap": "Tile Overlap", "debug_mode": "Show Debug Logs", "after_run": "After run",
     "blocks_to_swap": "BlockSwap: DiT blocks kept in RAM", "swap_io_components": "BlockSwap: I/O layers too",
 }
@@ -61,6 +61,14 @@ def test_ui_components_come_in_the_order_of_the_run_parameters(script):
     labels = [component.kwargs["label"] for component in script.ui(is_img2img=False)]
     run_parameters = list(inspect.signature(script.run).parameters)[1:]
     assert labels == [RUN_PARAMETER_LABELS[name] for name in run_parameters]
+
+
+def test_vae_tile_slider_defaults_to_512_under_a_new_label(script):
+    """A new label is a new ui-config.json key, so the 1024 that older versions saved under "Tile Size" no longer
+    applies; 512 keeps the VAE phases inside 8 GB of VRAM."""
+    tile_size = next(component for component in script.ui(is_img2img=True)
+                     if component.kwargs["label"] == "VAE Tile Size")
+    assert (tile_size.kwargs["value"], tile_size.kwargs["minimum"], tile_size.kwargs["maximum"]) == (512, 512, 2048)
 
 
 def test_ui_offers_the_models_in_the_folder(script):
