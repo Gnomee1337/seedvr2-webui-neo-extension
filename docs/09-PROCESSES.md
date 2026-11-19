@@ -105,7 +105,7 @@ The source of truth is the code.
 11. End of run (`seedvr2_neo/model_lifecycle.py`): "Keep in RAM" after all passes succeeded → models stay cached
    in system RAM (the pipeline moves them off the GPU after their phase); otherwise — "Unload", an error or an
    interrupt — both models are removed from the cache. Either way `gc.collect()` + `devices.torch_gc()`; the console says which.
-12. Result (`build_result` in the script): one image and one infotext per input, in input order. The infotext is the
+12. Result (`build_result` in the script, `finish_images` in `seedvr2_neo/run_results.py`): one image and one infotext per input, in input order. The infotext is the
    base one (`BaseInfotext` in `seedvr2_neo/run_results.py`: Forge's infotext of the generated image in txt2img; the
    prompt and `Negative prompt:` line in img2img) with `SeedVR2 Model`, `SeedVR2 VAE`, `SeedVR2 Resolution`,
    `SeedVR2 Seed` added to its parameters line. Forge's `create_infotext` is not used: it reads the SD model, which is

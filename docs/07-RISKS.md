@@ -149,12 +149,10 @@ Live-checked on an 8 GB GPU without bf16, 16 GB RAM, 1080px output, VAE tile 512
 - 🟢 R2 (S1×L2) **Upscaled pixels are truncated, not rounded, to 8 bits** (`tensor_to_images` in
   `seedvr2_neo/upscale_run.py`: `* 255` then `astype(uint8)`): channels come out up to one level darker (a flat 10
   comes back as 9). Not visible by eye; fix together with a pipeline-output change, not in a refactor.
-- 🟢 R3 (S1×L3) **No CI; `scripts/seedvr2_script.py` has no tests** (needs Forge stubs). Also untested: the
-  pipeline import before the base image (checked by code order and a stubbed import check only), and our calls against
-  the real `GlobalModelCache` / `validate_blockswap_config` (tests use stand-ins), so an upstream sync can break them
-  with all tests green. (B09)
-- 🟢 R2 (S1×L2) **`scripts/seedvr2_script.py` is ~520 lines** (guideline ~300): UI, run flow, result building and the
-  pipeline calls in one file. Split it when Forge stubs make `run()` testable (B09).
+- 🟢 R3 (S1×L3) **The script's tests run against stand-ins of Forge, Gradio and the pipeline** (`tests/scripts/forge_stubs.py`).
+  A Forge Neo change of a name or signature the script uses, or an upstream change of `GlobalModelCache` /
+  `prepare_runner` / `validate_blockswap_config`, leaves all tests green. Mitigation: the stand-ins follow
+  `external-apis/forge-neo.md`; a live run after a Forge or upstream update.
 - 🟢 R3 (S1×L3) **Leftover `src/` folder after an update.** Forge's update (`reset --hard`) removes the tracked files but
   keeps untracked `src/**/__pycache__`. Harmless: nothing imports `src`, and a folder without `__init__.py` loses to
   another extension's real `src` package. Users may delete it by hand.

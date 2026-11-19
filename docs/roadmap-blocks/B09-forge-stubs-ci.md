@@ -25,11 +25,12 @@ file is split so each part fits the size guideline (risks R2, R3).
 5. Docs: architecture (new modules, stubs), STATE, RISKS R2/R3, decisions (minimal CI, stub approach).
 
 ## Acceptance criteria
-- [ ] `python -m pytest tests` runs `Script.run()` for txt2img and img2img through the stubs, without Forge installed.
-- [ ] The listed run scenarios (step 2) each have a test; the same tests pass before and after the split.
-- [ ] `scripts/seedvr2_script.py` ≤ ~300 lines; no file in `seedvr2_neo/` imports Forge or Gradio.
-- [ ] The GitHub Actions run on the block branch is green (link to the run).
-- [ ] Full test run green; live smoke run in Forge (one txt2img + one img2img through the API) unchanged after the split.
+- [x] `python -m pytest tests` runs `Script.run()` for txt2img and img2img through the stubs, without Forge installed.
+- [x] The listed run scenarios (step 2) each have a test; the same tests pass before and after the split.
+- [x] `scripts/seedvr2_script.py` ≤ ~300 lines (317); no file in `seedvr2_neo/` imports Forge or Gradio.
+- [x] The GitHub Actions run on the block branch is green: <https://github.com/Gnomee1337/seedvr2-webui-neo-extension/actions/runs/44610246289>.
+- [x] Full test run green (1658); live run in Forge: txt2img batch of 2 upscaled; img2img stalled in the VAE phase on
+  `main` as well (risk 🟠 R9 in `07-RISKS.md`), so unchanged by the split.
 
 ## Which checks are needed on `/block-done`
 Always: `code-auditor`, `fresh-eyes-reviewer`, `plan-drift-checker`. Additionally (tick what applies):
@@ -46,6 +47,8 @@ B07 merged (done). Pushing the block branch to GitHub so Actions can run — nee
 - Branch protection rules on GitHub (owner's setting; can be suggested after CI is green).
 - Any behavior change of the script — only a refactor under tests.
 - A linter (`ruff`) in CI — the owner chose minimal CI.
+- Fixing the VAE tile-1024 stall found in the live run (🟠 R9) and the 8-bit truncation (🟢 R2) — behavior changes.
+- A test that imports Forge Neo's bundled `gguf` (risk R2 in section 2) — needs a Neo install.
 
 ## Hidden assumptions
 - The stubs only stay honest if their signatures follow Forge Neo: the names, signatures and `p.*` fields the script
@@ -54,9 +57,8 @@ B07 merged (done). Pushing the block branch to GitHub so Actions can run — nee
   `sd_models.unload_model_weights` is reached both through `sys.modules` and the `modules` package attribute;
   `images.save_image` returns `(fullfn, txt_fullfn)` and sets `image.already_saved_as`; a simple stub `Processed`
   (the real one reads ~25 `p.*` fields). `FormRow` is imported but unused.
-- CI facts (`docs/external-apis/github-actions-ruff.md`): `actions/checkout@v7`, `actions/setup-python@v7`,
-  CPU torch from `https://download.pytorch.org/whl/cpu`. Not verified: a cp310 Linux CPU wheel for the current torch
-  (else pin an older torch or run CI on a newer Python).
+- CI facts (`docs/external-apis/github-actions.md`): `actions/checkout@v7`, `actions/setup-python@v7`, CPU torch from
+  `https://download.pytorch.org/whl/cpu` (a cp310 wheel exists, checked by the first CI run).
 - Existing tests need no torch; importing the script does (torch, torchvision at module level). `numpy` comes only
   through `gguf` — list it in `requirements-dev.txt`.
 
