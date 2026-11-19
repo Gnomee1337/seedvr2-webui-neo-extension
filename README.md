@@ -56,7 +56,7 @@ like Forge's own: with **Settings → Saving images → Always save all generate
 with the `-seedvr2` suffix; with it off (or `save_images: false` in an API call) the extension writes no files at all.
 **Save Extra Copy of Original** also saves the img2img input image (`-original`); txt2img images are saved by Forge.
 If the upscale is interrupted or fails, the images come back as they were, with `SeedVR2 Error` in their parameters
-and a note under the result. **Unload SD Checkpoint** (on by default) frees VRAM for SeedVR2; the checkpoint is
+and a note under the result (API callers: look for `SeedVR2 Error` in `info` → `infotexts`). **Unload SD Checkpoint** (on by default) frees VRAM for SeedVR2; the checkpoint is
 reloaded on the next generation.
 
 **After run:** *Unload SeedVR2* (default) frees the SeedVR2 models from VRAM and RAM when the upscale ends;

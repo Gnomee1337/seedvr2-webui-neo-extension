@@ -113,3 +113,52 @@ with the checkpoint unloaded. R = S1 × L2 = 2 🟢
 ## Missed changes
 - `README.md` (F1).
 - `forge-neo.md` "Not verified" `save_images` default can be closed (False); Batch-tab excerpt (F6).
+
+## Re-check after e455f0c (code) and ce8b2de (docs)
+
+Scope: `git diff efcf507..HEAD`; Forge facts re-checked in the local Neo checkout (`processing.py:317-318, 510, 580-597`,
+`ui_tempdir.py:26-48`, `api/api.py:100-125`, `txt2img.py:157`, `img2img.py:299`, `images.py:783`).
+
+### Original findings
+| # | Status | Note |
+|---|---|---|
+| F1 README | closed | `README.md:44-50` describes every-image batches, no grid, saving rule, `-original` for img2img only, failures. |
+| F2 failures look like results | closed for the UI, partly for the API | `p.comment` shows under the result in the UI (`txt2img.py:157`, `img2img.py:299`). The API returns `info = processed.js()`, which has no `comments` key; an API caller still learns of a failure only by finding `SeedVR2 Error` in `infotexts[i]` (now also embedded in each base64 PNG). Acceptable if the README says so for API users — it does not yet. R = S2 × L1 = 2 🟢 |
+| F3 originals with saving off | closed | `plan_saving` (`run_results.py:44-57`): `save_originals` requires `save_results` and img2img. |
+| F4 plan before upscale / Skip | closed | No longer `p.save_samples()`; docstring explains the Skip case; `07-RISKS` states finished passes are saved after an interrupt. |
+| F5 txt2img overrides | closed | `read_option` for `samples_save`, `samples_format`, `save_to_dirs`; `07-RISKS` lists which overrides reach the saves. |
+| F6 / F7 07-RISKS entries | closed | Both rewritten correctly; `forge-neo.md` gains the `save_samples`, overrides, API defaults facts. |
+| F8 stale `all_seeds` comment | closed | `seedvr2_script.py:329`. |
+| F9 "load once" docstrings | closed | `_upscale_images` / `_upscale_tensor` now say per pass. |
+| F10 narrow save catch | closed | `except Exception` with a reason (`seedvr2_script.py:~186`). |
+| F11 seed message | closed | `is_unusable_seed` + console line (`seedvr2_script.py:~327`). |
+| F12 stale card / forge-neo | mostly closed | `forge-neo.md` "Prompt/seed lists" fixed; the card still lists "Batching several images through the pipeline in one pass" as out of scope and step 3 still says "fill what `create_infotext` needs" — the card is deleted on `/block-done`, so only a risk if copied. |
+
+### New findings
+
+**N1 IMPORTANT — the live acceptance ticks predate the fix commit.** `docs/roadmap-blocks/B07-correct-results.md`
+(criteria ticked, "Progress"). Every live run listed was done before e455f0c, which rewrote the run path of the script
+(`_collect_inputs`, `RunInputs`, `read_option`, `embed_infotext`, `p.comment`, pass splitting, settings parsing). `run()`
+has no unit tests (Forge stubs are B09), so a mistake there breaks every run for every user on update. The card also
+still says the Batch-tab `save_to_dirs` re-check is pending. Before merge: at least one txt2img batch and one img2img
+run (one with an interrupt) live on HEAD, plus the Batch tab. R = S3 × L1 = 3 🟢 by the matrix, but the cost of being
+wrong is every user's run; treat as a merge precondition.
+
+**N2 MINOR — `describe_img2img_inputs` docstring now false.** `scripts/seedvr2_script.py:173-174` says "`p` is not
+changed — the Batch tab reuses it"; `build_result` now calls `p.comment(...)` (`:215`). Consequence in the Batch tab:
+`process_batch` keeps the first file's `Processed` and only extends its images/infotexts (`img2img.py:164-169`), so a
+failure note from file 2+ never appears under the result, while `p.comments` keeps accumulating on the reused `p`.
+R = S1 × L2 = 2 🟢
+
+**N3 MINOR — "-original" and failed results are the converted image, not the input.** `save_originals` gets
+`collected.images` after `to_pipeline_image` (`seedvr2_script.py:~282`, `:331`). A 16-bit grayscale, CMYK or palette
+input is saved as `-original` in 8-bit RGB/RGBA, and comes back converted on failure. `09-PROCESSES` mentions the
+failure case; the "Extra Copy of Original" label and README promise the original. R = S1 × L2 = 2 🟢
+
+**N4 MINOR — a not-upscaled txt2img image loses its link to Forge's saved file.** `embed_infotext`
+(`seedvr2_script.py:~219-226`) returns `image.copy()`; Pillow's `copy()` keeps `info` but not the `already_saved_as`
+attribute Forge set on the base image (`images.py:783`), so the gallery writes a temp copy (`ui_tempdir.py:27`)
+instead of serving the saved file. Only on failure; extra temp file, no user data harmed. R = S1 × L1 = 1 🟢
+
+**N5 MINOR — `is_unusable_seed("")` is True.** `seedvr2_neo/run_inputs.py:~123`: an empty string from an API caller
+prints "Seed '' is outside 0 … 2^32-1", while the docstring says empty means "not chosen". Cosmetic. R = S1 × L1 = 1 🟢

@@ -137,7 +137,7 @@ def resolve_seed(ui_seed: Any, image_seeds: Optional[Sequence[Any]], base_seed: 
 
 def is_unusable_seed(value: Any) -> bool:
     """True for a seed that was given (not -1 / empty) but cannot be used, so the caller can say it is replaced."""
-    if value is None or isinstance(value, bool):
+    if value is None or isinstance(value, bool) or (isinstance(value, str) and not value.strip()):
         return False
     try:
         if float(value) == RANDOM_SEED:

@@ -28,6 +28,10 @@ TILE_SIZE = Bounds(512, 2048, 1024, 128)
 TILE_OVERLAP = Bounds(64, 512, 128, 32)
 USE_TILE_VAE_DEFAULT = True
 
+# The longest output edge is capped at this many times the shortest one: a very thin input (1x4096 through the API)
+# would otherwise ask for a gigapixel output. Up to 4:1 panoramas keep the requested resolution.
+MAX_LONG_EDGE_FACTOR = 4
+
 
 @dataclass(frozen=True)
 class UpscaleSettings:
@@ -39,6 +43,11 @@ class UpscaleSettings:
     use_tile_vae: bool
     tile_size: int
     tile_overlap: int
+
+    @property
+    def max_resolution(self) -> int:
+        """The pipeline's `max_resolution` (longest edge); it scales the whole image down when exceeded."""
+        return self.resolution * MAX_LONG_EDGE_FACTOR
 
 
 def parse_upscale_settings(resolution: Any, input_noise: Any, latent_noise: Any, use_tile_vae: Any, tile_size: Any,

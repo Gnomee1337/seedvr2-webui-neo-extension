@@ -211,3 +211,8 @@ def test_random_or_valid_seeds_are_usable(value):
 @pytest.mark.parametrize("value", [2 ** 32, -5, "abc", float("nan")])
 def test_given_but_unusable_seeds_are_reported(value):
     assert ri.is_unusable_seed(value) is True
+
+
+@pytest.mark.parametrize("value", ["", "  "])
+def test_empty_api_seed_is_not_reported(value):
+    assert ri.is_unusable_seed(value) is False

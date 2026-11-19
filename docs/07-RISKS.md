@@ -132,6 +132,10 @@ Live-checked on an 8 GB GPU without bf16, 16 GB RAM, 1080px output, VAE tile 512
   shifts the infotexts of later files.
 - 🟢 R2 (S1×L2) **The SeedVR2 keys are not read back into the script's controls** ("Send to" / PNG Info restore only
   Forge's fields; B08 candidate). An img2img infotext has the prompt and the SeedVR2 keys, no Forge `Seed`.
+- 🟢 R2 (S1×L2) **`-original` copies and not-upscaled results are the converted input** (8-bit RGB / RGBA), not the
+  file as given: a 16-bit, CMYK or palette input loses its original form there. The upscale itself needs the conversion.
+- 🟢 R1 (S1×L1) **A failure note from the second file on is not shown in the img2img Batch tab:** Forge keeps the
+  `Processed` (and its comments) of the first file only; each image's infotext still has `SeedVR2 Error`.
 - 🟢 R1 (S1×L1) **A 16-bit grayscale PNG loses its transparency key** (it is scaled correctly, but comes back opaque).
   Repro: `test_16_bit_png_with_transparency_is_scaled_and_keeps_alpha` (strict xfail).
 - 🟢 R3 (S1×L3) **Interrupt reacts only between phases** and the Forge progress bar is not updated during SeedVR2.
@@ -142,6 +146,8 @@ Live-checked on an 8 GB GPU without bf16, 16 GB RAM, 1080px output, VAE tile 512
   pipeline import before the base image (checked by code order and a stubbed import check only), and our calls against
   the real `GlobalModelCache` / `validate_blockswap_config` (tests use stand-ins), so an upstream sync can break them
   with all tests green. (B09)
+- 🟢 R2 (S1×L2) **`scripts/seedvr2_script.py` is ~520 lines** (guideline ~300): UI, run flow, result building and the
+  pipeline calls in one file. Split it when Forge stubs make `run()` testable (B09).
 - 🟢 R3 (S1×L3) **Leftover `src/` folder after an update.** Forge's update (`reset --hard`) removes the tracked files but
   keeps untracked `src/**/__pycache__`. Harmless: nothing imports `src`, and a folder without `__init__.py` loses to
   another extension's real `src` package. Users may delete it by hand.

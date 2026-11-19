@@ -41,6 +41,12 @@ def test_tile_overlap_is_clamped():
     assert parse(tile_overlap=10000).tile_overlap == 512
 
 
+def test_longest_edge_is_capped_at_four_times_the_resolution():
+    # a 1x4096 API input must not ask for a gigapixel output
+    assert parse(resolution=1080).max_resolution == 4320
+    assert parse(resolution=100000).max_resolution == 4 * 3840
+
+
 @pytest.mark.parametrize("raw, expected", [("False", False), ("true", True), (0, False), (None, True)])
 def test_tiling_flag_reads_api_strings(raw, expected):
     assert parse(use_tile_vae=raw).use_tile_vae is expected

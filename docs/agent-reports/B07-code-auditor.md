@@ -134,3 +134,67 @@ their own; `p.all_seeds` is not set without `process_images`".
   run passed; worth adding the infotexts fact to `forge-neo.md`.
 - `prepare_run` (line 359) is still outside the `try` — unchanged from B06.
 - Float (`F`) images in [0, 1] convert to black (Pillow clips without scaling); very unlikely input, not raised as a finding.
+
+---
+
+## Re-check after fixes (e455f0c, docs ce8b2de)
+
+Scope: `git diff efcf507..HEAD -- scripts seedvr2_neo tests` plus the docs the findings named. Tests: **1591 passed,
+1 skipped, 3 xfailed** (the new xfail is the documented 16-bit + tRNS alpha loss). Helpers were probed with a
+scratch script.
+
+| Finding | Status | Evidence |
+|---|---|---|
+| I1 Skip → no results, duplicate originals | **Closed** | `plan_saving` (`run_results.py:44-56`) no longer reads `p.save_samples()`; reads `samples_save` (with overrides) and `do_not_save_samples`; originals never in txt2img |
+| M1 conversions outside try | **Closed** | `parse_upscale_settings` + `build_memory_plan` at `seedvr2_script.py:322-324`, before any generation; clamps/defaults, never raises (probed with `"1e9"`, `"x"`, `None`, `10**9`) |
+| M2 16-bit + transparency → white | **Closed** | wide grayscale checked first (`run_inputs.py:67-70`, numpy scaling); alpha loss is a documented xfail + 07-RISKS |
+| M3 raw CMYK etc. returned | **Closed** | `_collect_inputs` converts once (`seedvr2_script.py:380`); failures and originals use the converted images |
+| M4 seed replaced silently | **Closed** | console note via `is_unusable_seed` (`seedvr2_script.py:376-377`); see N3 for a wording nit |
+| M5 txt2img overrides ignored | **Closed** | `read_option` for `samples_save`, `samples_format`, `save_to_dirs`; remaining options listed in 07-RISKS:127-129 |
+| M6 run() too long | **Partly** | `run()` 46 lines, `_collect_inputs` 32 — fine; the module grew to 521 lines (guideline ~300). Pre-existing debt, not blocking |
+| M7 shadowed param / magic strings | **Closed** | param removed (`_upscale_tensor`, line 453); `INTERRUPTED_MESSAGE`, `NOT_UPSCALED_MESSAGE` |
+| M8 wrong comment | **Closed** | `seedvr2_script.py:378` |
+| M9 docs/tests | **Mostly closed** | 07-RISKS:134 fixed; `read_option` tests (`test_run_results.py:48-61`) cover the efcf507 rule; edge tests added (huge count, distinct, seeds). Card still describes `create_infotext` (step 3, line 25; assumptions, line 71) — temporary card, fix or drop at `/block-done` |
+
+Checked and found correct: `split_into_passes` keeps input order inside groups, never yields an empty pass, gives an
+over-budget frame its own pass, and `_upscale_images` maps outputs back by the pass's input indices (20 × 1024² at
+1080 → passes of 14 + 6); `estimate_output_pixels` guards zero sizes; `read_option` ignores non-Mapping overrides;
+`parse_upscale_settings` rejects bool/NaN/inf; failure infotext carries only the exception type; `p.comment` is a
+verified Neo API (forge-neo.md:235); `finish_run` still in `finally`; no unused imports.
+
+### New findings
+
+#### N1. txt2img "Save Extra Copy of Original" now never writes anything; card's owner agreement says otherwise — 🟢 R2 (S1×L2) MINOR
+`seedvr2_neo/run_results.py:55`; `docs/roadmap-blocks/B07-correct-results.md:98`
+
+Scenario: txt2img, "Always save all generated images" off, "Save Extra Copy of Original" on. On `main` and at
+efcf507 an `-original` file was written (Forge did not save the base image); now `save_originals` is False for every
+txt2img run, so nothing is written. 05-DECISIONS and the checkbox `info` text were updated, but the card's "Agreed with
+the owner" still says "saves the base image only when Forge did not already save it". Fix: confirm the narrowed rule
+with the owner and update the card line (or restore the txt2img branch).
+
+#### N2. `embed_infotext` copies every upscaled image, doubling the peak RAM of the results — 🟢 R2 (S1×L2) MINOR
+`seedvr2_script.py:208, 225`
+
+`build_result` holds `run_images` (all upscaled outputs) and `result_images` (a full `image.copy()` of each) until it
+returns. Scenario: img2img API call with 40 inputs → 2048² output: ~0.5 GB of results becomes ~1 GB at the end of the
+run, on top of what the pass budget limits. The copy is needed only for images the script does not own (the inputs /
+Forge's base images returned on failure). Fix: copy only when `not run_image.is_upscaled`; set `info` on upscaled
+images directly.
+
+#### N3. An empty seed string is reported as "outside 0 … 2^32-1" — 🟢 R1 (S1×L1) MINOR
+`seedvr2_neo/run_inputs.py:138-147`; `seedvr2_script.py:377`
+
+`is_unusable_seed("")` and `is_unusable_seed(" ")` return True (probed), contradicting its docstring "given (not -1 /
+empty)". Scenario: an API client sends `""` for the seed → console prints "Seed '' is outside 0 … 2^32-1"; the seed
+itself is resolved correctly. Fix: treat blank strings like None; add the case to the test.
+
+### Notes (not findings)
+- img2img `-original` files are now written from the converted image (CMYK → RGB, 16-bit → 8-bit), not the exact
+  input; reasonable, but the name suggests a byte copy — worth a line in 09-PROCESSES.
+- An RGB PNG with a tRNS key now becomes RGBA (it was returned as RGB at efcf507); consistent with "RGBA when it has
+  transparency".
+- `p.override_settings` is read directly at `seedvr2_script.py:333` but via `getattr` at line 188; harmless in Forge.
+
+Re-check summary: closed 8 (I1, M1–M5, M7, M8), partly open 2 (M6 module size, M9 card text), new 3 MINOR (N1–N3).
+No BLOCKER or IMPORTANT open.

@@ -30,3 +30,16 @@ Checked and clean: no personal data, local paths, models, binaries or `__pycache
 `requirements-dev.txt`; saving rules ("Save original" off by default, `parse_flag`, `save_images=false` → no files);
 seed parsing rejects nan/inf/bool/out of range; infotext quoting keeps the params line parseable and a multi-line
 prompt cannot fake parameters; `finish_run` in `finally` covers all groups and errors.
+
+## Re-check (after e455f0c)
+Closed: F1 (16 MP pass budget, per-frame conversion), F3 (exception type only), F6 (settings parsed before
+generation, never raise), F7 (`read_option` tolerant, `save_to_dirs` via `parse_flag`), F8 (broad save catch).
+F4 / F5 kept as documented behaviour — agreed (Forge's Batch tab collides the same way; finished passes are complete
+images and saving still follows `samples_save` / `save_images`).
+Remaining, all MINOR R2, fixed by the main chat right after:
+- F2 rest: a frame above the budget had no upper limit (`max_resolution=0`) → `max_resolution = 4 × resolution`
+  (`UpscaleSettings.max_resolution`).
+- Pipeline import error put the full message (local paths) into the result → type only.
+- `embed_infotext` copied the script's own upscaled images (2× peak RAM) → only inputs / base images are copied.
+INFO: `samples_format` from the API's `override_settings` adds no new surface (Forge applies it to its own images).
+Repo check: no personal data, absolute paths or model files in the diff.

@@ -170,8 +170,8 @@ def describe_txt2img_inputs(p, base_infotexts: List[str], count: int) -> List[In
 
 
 def describe_img2img_inputs(p, seed: int, count: int) -> List[InputDetails]:
-    """img2img inputs have no seed or infotext of their own: the SeedVR2 seed and the prompt from the UI. `p` is not
-    changed — the Batch tab reuses it for the next file."""
+    """img2img inputs have no seed or infotext of their own: the SeedVR2 seed and the prompt from the UI. Nothing is
+    stored on `p` for this — the Batch tab reuses it for the next file."""
     details = InputDetails(seed, p.prompt, BaseInfotext.from_prompt(p.prompt, p.negative_prompt))
     return [details] * count
 
@@ -205,7 +205,9 @@ def build_result(p, run_images: List[RunImage], details: List[InputDetails], par
     result_images, infotexts = [], []
     for index, (run_image, input_details) in enumerate(zip(run_images, details)):
         infotext = input_details.infotext.with_params(params if run_image.is_upscaled else failure_params)
-        image = embed_infotext(run_image.image, infotext)
+        # Upscaled images are the script's own; inputs and Forge's base images are copied before their info changes
+        image = run_image.image if run_image.is_upscaled else copy_keeping_saved_file(run_image.image)
+        embed_infotext(image, infotext)
         result_images.append(image)
         infotexts.append(infotext)
         if run_image.is_upscaled and save_plan.save_results:
@@ -217,14 +219,21 @@ def build_result(p, run_images: List[RunImage], details: List[InputDetails], par
     return Processed(p, result_images, result_seed, infotexts[0], infotexts=infotexts)
 
 
-def embed_infotext(image: Image.Image, infotext: str) -> Image.Image:
-    """The image with its infotext in `info["parameters"]`, where Forge's gallery and API look for it when the image
-    is not saved to disk. A copy, so the caller's image (Forge's base image or an input) is not changed."""
-    if not shared.opts.enable_pnginfo:
-        return image
-    image = image.copy()
-    image.info[PNG_INFO_KEY] = infotext
-    return image
+def copy_keeping_saved_file(image: Image.Image) -> Image.Image:
+    """A copy that still points the gallery to the file Forge already saved (`already_saved_as`), so it serves that
+    file instead of writing a temporary one."""
+    copied = image.copy()
+    saved_as = getattr(image, "already_saved_as", None)
+    if saved_as:
+        copied.already_saved_as = saved_as
+    return copied
+
+
+def embed_infotext(image: Image.Image, infotext: str) -> None:
+    """Put the infotext into `image.info["parameters"]`, where Forge's gallery and API look for it when the image is
+    not saved to disk. Changes `image` in place."""
+    if shared.opts.enable_pnginfo:
+        image.info[PNG_INFO_KEY] = infotext
 
 
 class Script(scripts.Script):
@@ -317,7 +326,7 @@ class Script(scripts.Script):
             pipeline = import_pipeline()
         except Exception as e:  # not only ImportError: the import also probes bf16 on the GPU and may raise (e.g. OOM)
             print(f"❌ [SeedVR2] Cannot import the pipeline: {type(e).__name__}: {e}")
-            return empty_result(p, f"Error: {e}")
+            return empty_result(p, f"Error: cannot import the SeedVR2 pipeline ({type(e).__name__}; see the console)")
 
         # Read before any generation, so a bad API value costs nothing
         settings = parse_upscale_settings(resolution, input_noise, latent_noise, use_tile_vae, tile_size, tile_overlap)
@@ -491,7 +500,7 @@ class Script(scripts.Script):
         ctx['cache_context'] = cache_context
 
         frames_tensor, _generation_info = pipeline.compute_generation_info(
-            ctx=ctx, images=img_tensor, resolution=request.settings.resolution, max_resolution=0,
+            ctx=ctx, images=img_tensor, resolution=request.settings.resolution, max_resolution=request.settings.max_resolution,
             batch_size=1, uniform_batch_size=False, seed=request.seed,
             prepend_frames=0, temporal_overlap=0, debug=debug
         )
@@ -499,7 +508,7 @@ class Script(scripts.Script):
         if not debug_mode: print(f"[SeedVR2] Phase 1/4: Encoding {'(Tiled)' if request.settings.use_tile_vae else ''}...")
         ctx = pipeline.encode_all_batches(runner, ctx=ctx, images=frames_tensor, debug=debug, batch_size=1, uniform_batch_size=False, seed=request.seed,
                                           progress_callback=check_interruption,
-                                          temporal_overlap=0, resolution=request.settings.resolution, max_resolution=0, input_noise_scale=request.settings.input_noise, color_correction="lab")
+                                          temporal_overlap=0, resolution=request.settings.resolution, max_resolution=request.settings.max_resolution, input_noise_scale=request.settings.input_noise, color_correction="lab")
         release_freed_memory()
 
         if not debug_mode: print("[SeedVR2] Phase 2/4: Upscaling...")
