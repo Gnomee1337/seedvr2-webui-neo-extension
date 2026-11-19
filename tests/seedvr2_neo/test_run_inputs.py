@@ -112,6 +112,65 @@ def test_no_images_no_groups():
     assert ri.group_by_shape([]) == []
 
 
+def test_rgb_with_transparency_key_becomes_rgba():
+    image = Image.new("RGB", (2, 2))
+    image.info["transparency"] = (0, 0, 0)
+
+    assert ri.to_pipeline_image(image).mode == "RGBA"
+
+
+def test_16_bit_grayscale_with_transparency_is_not_white():
+    image = Image.new("I;16", (1, 1), 32768)
+    image.info["transparency"] = 1000
+
+    pixel = ri.to_pipeline_image(image).getpixel((0, 0))
+
+    assert 120 <= pixel[0] <= 135
+
+
+def test_i16n_is_scaled_not_black():
+    pixel = ri.to_pipeline_image(Image.new("I;16N", (1, 1), 32768)).getpixel((0, 0))
+
+    assert 120 <= pixel[0] <= 135
+
+
+# --- split_into_passes ---
+
+def test_small_group_is_one_pass():
+    images = [Image.new("RGB", (512, 512)) for _ in range(4)]
+
+    assert ri.split_into_passes([[0, 1, 2, 3]], images, 1024) == [[0, 1, 2, 3]]
+
+
+def test_group_over_the_budget_is_split_in_order():
+    images = [Image.new("RGB", (512, 512)) for _ in range(5)]
+    budget = 2 * 1024 * 1024  # two upscaled 1024x1024 frames
+
+    assert ri.split_into_passes([[0, 1, 2, 3, 4]], images, 1024, budget) == [[0, 1], [2, 3], [4]]
+
+
+def test_frame_larger_than_the_budget_gets_its_own_pass():
+    images = [Image.new("RGB", (512, 512)) for _ in range(2)]
+
+    assert ri.split_into_passes([[0, 1]], images, 3840, 1024) == [[0], [1]]
+
+
+def test_groups_are_never_merged():
+    images = [Image.new("RGB", (8, 8)), Image.new("RGB", (4, 8))]
+
+    assert ri.split_into_passes([[0], [1]], images, 512) == [[0], [1]]
+
+
+def test_default_budget_keeps_a_batch_of_8_at_1080p_in_one_pass():
+    images = [Image.new("RGB", (1024, 1024)) for _ in range(8)]
+
+    assert ri.split_into_passes([list(range(8))], images, 1080) == [list(range(8))]
+
+
+def test_output_pixels_follow_the_aspect_ratio():
+    assert ri.estimate_output_pixels((1000, 500), 1000) == 2_000_000
+
+
 # --- resolve_seed ---
 
 def test_seed_typed_in_the_ui_wins():
@@ -140,3 +199,15 @@ def test_forge_seed_above_int32_is_accepted():
 @pytest.mark.parametrize("ui_seed", ["42", 42.0, " 42 "])
 def test_api_seed_as_string_or_float_is_read(ui_seed):
     assert ri.resolve_seed(ui_seed, [], -1) == 42
+
+
+# --- is_unusable_seed ---
+
+@pytest.mark.parametrize("value", [-1, "-1", -1.0, None, 0, 42, 2 ** 32 - 1])
+def test_random_or_valid_seeds_are_usable(value):
+    assert ri.is_unusable_seed(value) is False
+
+
+@pytest.mark.parametrize("value", [2 ** 32, -5, "abc", float("nan")])
+def test_given_but_unusable_seeds_are_reported(value):
+    assert ri.is_unusable_seed(value) is True

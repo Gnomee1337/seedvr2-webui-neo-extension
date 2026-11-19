@@ -8,22 +8,23 @@ from seedvr2_neo import run_results as rr
 
 def test_txt2img_with_saving_on_saves_results_and_no_second_original():
     # Forge already saved the base images by the same rule
-    plan = rr.plan_saving(is_txt2img=True, samples_allowed=True, saving_disabled_by_caller=False,
+    plan = rr.plan_saving(is_txt2img=True, samples_save=True, saving_disabled_by_caller=False,
                           save_original_requested=True)
 
     assert plan == rr.SavePlan(save_results=True, save_originals=False)
 
 
-def test_txt2img_with_saving_off_writes_only_the_requested_original():
-    plan = rr.plan_saving(is_txt2img=True, samples_allowed=False, saving_disabled_by_caller=False,
+@pytest.mark.parametrize("is_txt2img", [True, False])
+def test_always_save_off_writes_nothing_even_with_original_requested(is_txt2img):
+    plan = rr.plan_saving(is_txt2img=is_txt2img, samples_save=False, saving_disabled_by_caller=False,
                           save_original_requested=True)
 
-    assert plan == rr.SavePlan(save_results=False, save_originals=True)
+    assert plan == rr.SavePlan(save_results=False, save_originals=False)
 
 
 def test_img2img_input_is_saved_as_original_when_requested():
     # Forge never saves the img2img input itself
-    plan = rr.plan_saving(is_txt2img=False, samples_allowed=True, saving_disabled_by_caller=False,
+    plan = rr.plan_saving(is_txt2img=False, samples_save=True, saving_disabled_by_caller=False,
                           save_original_requested=True)
 
     assert plan == rr.SavePlan(save_results=True, save_originals=True)
@@ -31,17 +32,33 @@ def test_img2img_input_is_saved_as_original_when_requested():
 
 @pytest.mark.parametrize("is_txt2img", [True, False])
 def test_api_call_without_saving_writes_nothing(is_txt2img):
-    plan = rr.plan_saving(is_txt2img=is_txt2img, samples_allowed=False, saving_disabled_by_caller=True,
+    plan = rr.plan_saving(is_txt2img=is_txt2img, samples_save=True, saving_disabled_by_caller=True,
                           save_original_requested=True)
 
     assert plan == rr.SavePlan(save_results=False, save_originals=False)
 
 
 def test_original_not_requested_is_never_saved():
-    plan = rr.plan_saving(is_txt2img=False, samples_allowed=True, saving_disabled_by_caller=False,
+    plan = rr.plan_saving(is_txt2img=False, samples_save=True, saving_disabled_by_caller=False,
                           save_original_requested=False)
 
     assert plan.save_originals is False
+
+
+# --- read_option ---
+
+def test_override_wins_over_the_user_setting():
+    # the img2img Batch tab turns date subfolders off through override_settings
+    assert rr.read_option({"save_to_dirs": False}, "save_to_dirs", True) is False
+
+
+def test_without_override_the_default_is_used():
+    assert rr.read_option({"other": 1}, "save_to_dirs", True) is True
+
+
+@pytest.mark.parametrize("overrides", [None, [], "save_to_dirs", 5])
+def test_missing_or_odd_override_settings_give_the_default(overrides):
+    assert rr.read_option(overrides, "save_to_dirs", "default") == "default"
 
 
 # --- generation parameters ---

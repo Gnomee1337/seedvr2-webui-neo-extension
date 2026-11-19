@@ -41,16 +41,30 @@ class RunImage(Generic[T]):
     is_upscaled: bool
 
 
-def plan_saving(is_txt2img: bool, samples_allowed: bool, saving_disabled_by_caller: bool,
+def plan_saving(is_txt2img: bool, samples_save: bool, saving_disabled_by_caller: bool,
                 save_original_requested: bool) -> SavePlan:
-    """Results follow Forge's own rule (`p.save_samples()`: "Always save all generated images", the API's
-    `save_images`, interruption). In txt2img Forge already saved the base images by that same rule, so an extra
-    original is written only when it did not; a caller that disabled saving (API) gets no files at all."""
-    base_saved_by_forge = is_txt2img and samples_allowed
+    """Results are saved when "Always save all generated images" is on and the caller did not disable saving (the
+    API's `save_images`); with saving off the extension writes nothing at all.
+
+    Not `p.save_samples()`: it also reads Forge's interrupted / skipped state, and a Skip on the last txt2img batch
+    stays set after the base images, which would stop saving for the whole run. The extra original is written only
+    for img2img inputs: in txt2img Forge itself saved the base images by the same rule."""
+    save_results = samples_save and not saving_disabled_by_caller
     return SavePlan(
-        save_results=samples_allowed,
-        save_originals=save_original_requested and not saving_disabled_by_caller and not base_saved_by_forge,
+        save_results=save_results,
+        save_originals=save_original_requested and save_results and not is_txt2img,
     )
+
+
+def read_option(override_settings: Any, name: str, default: Any) -> Any:
+    """A Forge option as this run sees it: the request's `override_settings` value when it has one, else `default`.
+
+    Forge applies `override_settings` only inside `process_images` (and restores them afterwards), so the script
+    reads them itself: img2img never calls it (the Batch tab turns date subfolders off that way), and in txt2img the
+    API's overrides are already restored when the upscaled images are saved."""
+    if isinstance(override_settings, Mapping) and name in override_settings:
+        return override_settings[name]
+    return default
 
 
 def seedvr2_generation_params(dit_model: str, vae_model: str, resolution: int, seed: int) -> Dict[str, Any]:
@@ -89,7 +103,9 @@ class BaseInfotext:
     @classmethod
     def from_forge(cls, infotext: str) -> "BaseInfotext":
         """An infotext Forge built for a generated image; its last line is the parameters."""
-        prompt_part, _, params_line = (infotext or "").rpartition("\n")
+        # Trailing whitespace is dropped first: after a final line break the parameters line would look empty, and the
+        # SeedVR2 keys would start a new line that Forge reads as the only parameters.
+        prompt_part, _, params_line = (infotext or "").rstrip().rpartition("\n")
         return cls(prompt_part, params_line)
 
     @classmethod
