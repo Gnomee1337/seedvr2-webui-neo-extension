@@ -174,7 +174,10 @@ Why: with 1024 and `--cuda-malloc` a VAE phase on an 8 GB GPU could run for many
 and finishes (07-RISKS, R6). Forge keeps a slider's value in `ui-config.json` under its label and prefers it to the code
 default, so the old label would have left existing users on 1024; the new label resets the tile size once for
 everyone, a value set on purpose included (owner's choice over editing Forge's `ui-config.json` from the extension).
-A fixed value, not a VRAM-based one: the same reasoning as BlockSwap; per-GPU presets are a roadmap item.
+A fixed value, not a VRAM-based one: the same reasoning as BlockSwap; per-GPU presets are a roadmap item. The overlap
+is capped at half the tile, so an overlap saved next to the old 1024 tile cannot pair with 512 into a few-pixel stride.
+API callers pass positional `script_args` and are unaffected; a client that maps them by `/sdapi/v1/script-info` label
+must use the new one. Any later default change meets the same `ui-config.json` trap.
 
 ### No 6K / 8K output sizes until the DiT works in tiles
 Why: the DiT sees the whole image; 8K is 33 MP, eight times an output that already takes minutes on an 8 GB GPU, and

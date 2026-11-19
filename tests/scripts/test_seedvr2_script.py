@@ -375,7 +375,7 @@ def test_api_values_outside_the_slider_ranges_are_clamped(script, make_txt2img, 
     run(script, make_txt2img(), resolution=99999, tile_size=1, tile_overlap=10**6)
     assert pipeline.generation_kwargs[0]["resolution"] == 3840
     runner = pipeline.runner_kwargs[0]
-    assert runner["encode_tile_size"] == (512, 512) and runner["encode_tile_overlap"] == (512, 512)
+    assert runner["encode_tile_size"] == (512, 512) and runner["encode_tile_overlap"] == (256, 256)
 
 
 def test_run_accepts_the_arguments_of_an_older_ui(script, make_txt2img):

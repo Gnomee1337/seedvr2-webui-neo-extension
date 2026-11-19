@@ -196,6 +196,7 @@ class Script(scripts.Script):
                 use_tile_vae = gr.Checkbox(label="Enable VAE Tiling", value=USE_TILE_VAE_DEFAULT)
                 # Forge keeps a slider's value in ui-config.json under its label and prefers it to the code default;
                 # this label is not "Tile Size" so the 1024 saved by older versions does not override the 512 default.
+                # Do not rename it back; any later label change resets the users' saved value again.
                 tile_size = gr.Slider(label="VAE Tile Size", **slider_range(TILE_SIZE))
                 tile_overlap = gr.Slider(label="Tile Overlap", **slider_range(TILE_OVERLAP))
 

@@ -59,6 +59,11 @@ If the upscale is interrupted or fails, the images come back as they were, with 
 and a note under the result (API callers: look for `SeedVR2 Error` in `info` → `infotexts`). **Unload SD Checkpoint** (on by default) frees VRAM for SeedVR2; the checkpoint is
 reloaded on the next generation.
 
+**VAE Tile Size** (Advanced Settings) defaults to 512 and **Tile Overlap** to 128; the overlap used is at most half
+the tile size. The slider was called "Tile Size" with a default of 1024 until November 2026: after updating from such a
+version it is reset to 512 one time, so a larger value set on purpose (on a 12–24 GB GPU it runs fewer tiles) needs
+setting again.
+
 **After run:** *Unload SeedVR2* (default) frees the SeedVR2 models from VRAM and RAM when the upscale ends;
 *Keep in RAM* keeps them for a faster next run at the cost of system RAM about the size of the two model files
 (3–4 GB for 3B fp8, ~16 GB for 7B fp16). An error or an interrupt during the upscale unloads them in either mode.
@@ -71,10 +76,9 @@ them on every run anyway.
   **BlockSwap: DiT blocks kept in RAM** to **16** (the script shows this hint when a 7B is selected). Measured with
   7B fp8 at 1080px on an 8 GB GPU: the DiT step went from ~13 minutes to 35–42 seconds. Fewer blocks are faster only
   while everything still fits; more blocks use less VRAM and run slower. 3B models need no BlockSwap.
-- **VAE Tile Size** (Advanced Settings) is 512 by default, which keeps VAE encoding and decoding inside VRAM; with
-  1024 a 1080px image overflowed into shared memory and, with `--cuda-malloc`, a run could hang for many minutes.
-  Versions before this one had a "Tile Size" slider defaulting to 1024; the renamed slider starts at 512 once, so a
-  value you had set there on purpose needs setting again.
+- **VAE Tile Size** (Advanced Settings) is 512 by default. Without `--cuda-malloc` that keeps VAE encoding and
+  decoding inside VRAM; with 1024 a 1080px image overflowed into shared memory, and with `--cuda-malloc` a run could
+  hang for many minutes. With `--cuda-malloc` the decode at 512 still spills somewhat (next point).
 - **`--cuda-malloc`** in Forge's launch options changes the speed: in the same test, VAE decoding took 12 s without
   it and 25–137 s with it (it reserves more VRAM than the card has), while the 7B DiT step with 8 BlockSwap blocks was
   faster with it (21 s vs 122 s). With 16 blocks both settings are close. If VAE decoding is slow, try launching without it.

@@ -168,7 +168,7 @@ of a local `neo` checkout finds nothing: Neo neither uses nor reserves such a fo
     `Number`, `Dropdown` (and `visible`); so a changed slider `minimum`/`maximum`/`step` in code is also ignored for existing
     users. Whether a saved `value` outside a new code range is clamped: not verified.
   - **Key.** `customscript/<basename of the script file>/<tab>/<label>/<field>`, e.g.
-    `customscript/seedvr2_script.py/txt2img/Tile Size/value`. `<tab>` is the interface id passed by `loadsave.add_block(interface, ifid)`
+    `customscript/seedvr2_script.py/txt2img/VAE Tile Size/value`. `<tab>` is the interface id passed by `loadsave.add_block(interface, ifid)`
     in `modules/ui.py` (`txt2img`, `img2img`); the script prefix comes from `control.custom_script_source =
     os.path.basename(script.filename)` (`ScriptRunner.create_script_ui_inner`, `modules/scripts.py`). `add_block` recurses into
     containers with the same `path`, so an Accordion/Row/Group label is not part of the key. Components with `label=None` are not

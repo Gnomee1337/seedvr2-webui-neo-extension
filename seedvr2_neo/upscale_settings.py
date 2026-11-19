@@ -55,14 +55,17 @@ class UpscaleSettings:
 def parse_upscale_settings(resolution: Any, input_noise: Any, latent_noise: Any, use_tile_vae: Any, tile_size: Any,
                            tile_overlap: Any) -> UpscaleSettings:
     """Raw values → settings. Out-of-range values are clamped to the slider's range; unreadable ones (text, NaN,
-    None) take the slider's default."""
+    None) take the slider's default. The tile overlap is also capped at half the tile size."""
+    tile = int(clamp_to_bounds(tile_size, TILE_SIZE))
     return UpscaleSettings(
         resolution=int(clamp_to_bounds(resolution, RESOLUTION)),
         input_noise=clamp_to_bounds(input_noise, NOISE),
         latent_noise=clamp_to_bounds(latent_noise, NOISE),
         use_tile_vae=USE_TILE_VAE_DEFAULT if use_tile_vae is None else parse_flag(use_tile_vae),
-        tile_size=int(clamp_to_bounds(tile_size, TILE_SIZE)),
-        tile_overlap=int(clamp_to_bounds(tile_overlap, TILE_OVERLAP)),
+        tile_size=tile,
+        # The VAE steps by tile minus overlap: an overlap near the tile size (512 with 512, both slider maximums allow
+        # it) means thousands of tiles and a phase that looks frozen. Half the tile keeps it to a few times the tiles.
+        tile_overlap=min(int(clamp_to_bounds(tile_overlap, TILE_OVERLAP)), tile // 2),
     )
 
 

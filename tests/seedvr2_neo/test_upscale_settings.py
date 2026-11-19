@@ -44,7 +44,14 @@ def test_unreadable_tile_size_takes_the_512_default(raw):
 
 def test_tile_overlap_is_clamped():
     assert parse(tile_overlap=0).tile_overlap == 64
-    assert parse(tile_overlap=10000).tile_overlap == 512
+    assert parse(tile_size=2048, tile_overlap=10000).tile_overlap == 512
+
+
+@pytest.mark.parametrize("tile, overlap, expected", [(512, 512, 256), (512, 384, 256), (512, 256, 256), (1024, 512, 512),
+                                                     ("abc", 512, 256)])
+def test_tile_overlap_is_capped_at_half_the_tile(tile, overlap, expected):
+    """An overlap saved next to the old 1024 tile must not pair with 512 into a stride of a few pixels."""
+    assert parse(tile_size=tile, tile_overlap=overlap).tile_overlap == expected
 
 
 def test_longest_edge_is_capped_at_four_times_the_resolution():
