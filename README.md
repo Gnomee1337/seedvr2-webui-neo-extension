@@ -46,11 +46,18 @@ After adding a model, press 🔄 next to the model dropdowns — no restart need
 Select **SeedVR2 Native Upscaler (24G)** in the **Script** dropdown at the bottom of the txt2img or img2img tab.
 Usually you only need to change **Upscale Resolution (Shortest Edge)**.
 
-- **txt2img** — the image is generated as usual (with all other extensions), then upscaled with SeedVR2.
-- **img2img** — the img2img diffusion pass is skipped; the input image is upscaled with SeedVR2 directly.
+- **txt2img** — the images are generated as usual (with all other extensions), then every image of the batch is
+  upscaled with SeedVR2 (the grid is not upscaled, and no grid of the results is made).
+- **img2img** — the img2img diffusion pass is skipped; every input image is upscaled with SeedVR2 directly (the
+  **Batch** tab works too). Grayscale, palette and 16-bit images become RGB; transparency is kept.
 
-The result is saved with the `-seedvr2` suffix. **Unload SD Checkpoint** (on by default) frees VRAM for SeedVR2;
-the checkpoint is reloaded on the next generation.
+Each result keeps its generation parameters plus `SeedVR2 …` keys (model, VAE, resolution, seed). Files are written
+like Forge's own: with **Settings → Saving images → Always save all generated images** on, each upscaled image is saved
+with the `-seedvr2` suffix; with it off (or `save_images: false` in an API call) the extension writes no files at all.
+**Save Extra Copy of Original** also saves the img2img input image (`-original`); txt2img images are saved by Forge.
+If the upscale is interrupted or fails, the images come back as they were, with `SeedVR2 Error` in their parameters
+and a note under the result. **Unload SD Checkpoint** (on by default) frees VRAM for SeedVR2; the checkpoint is
+reloaded on the next generation.
 
 **After run:** *Unload SeedVR2* (default) frees the SeedVR2 models from VRAM and RAM when the upscale ends;
 *Keep in RAM* keeps them for a faster next run at the cost of system RAM about the size of the two model files

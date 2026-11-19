@@ -30,17 +30,23 @@ is saved by the user's rules. These are the top user-visible risks in `07-RISKS.
 7. Live check in the owner's Forge (test branch), then `/block-done`.
 
 ## Acceptance criteria
-- [ ] txt2img, batch size 2 × batch count 2, "return grid" on: 4 upscaled images in the gallery, no upscaled grid, each
-      with its own seed/prompt in the info panel and in the saved PNG.
-- [ ] img2img with 2 input images (API or Batch tab): both are upscaled; the Batch tab writes each result once.
-- [ ] img2img with a grayscale (`L`) and a palette (`P`) PNG: upscaled, output is RGB; an RGBA PNG keeps its alpha.
-- [ ] "Always save all generated images" off → nothing written by the extension; on → one `-seedvr2` file per image;
-      "Save Extra Copy of Original" never writes a second copy of a file Forge already saved.
-- [ ] img2img result infotext has the prompt/parameters and `SeedVR2 …` keys; "Send to txt2img" restores the prompt
-      and Forge's parameters (the SeedVR2 keys are not read back into the script's controls).
-- [ ] `process_images` returning no images → a clear message, no traceback, VRAM released.
-- [ ] Interrupt during the upscale of a batch → every image comes back (the not-upscaled ones as their inputs with
-      `SeedVR2 Error: Interrupted`), the gallery count matches, models unloaded.
+- [x] txt2img, batch size 2 × batch count 2, "return grid" on: 4 upscaled images in the gallery, no upscaled grid, each
+      with its own seed/prompt in the info panel and in the saved PNG. *(API: 4 images 1024 px, 4 infotexts with 4
+      seeds; PNG Info of a saved file: Seed 1003, Steps 6, SeedVR2 keys.)*
+- [x] img2img with 2 input images (API or Batch tab): both are upscaled; the Batch tab writes each result once.
+      *(API: 3 inputs → 3; Batch tab by the owner: 2 → 2, after the `save_to_dirs` fix straight into the output folder.)*
+- [x] img2img with a grayscale (`L`) and a palette (`P`) PNG: upscaled, output is RGB; an RGBA PNG keeps its alpha. *(API.)*
+- [x] "Always save all generated images" off → nothing written by the extension; on → one `-seedvr2` file per image;
+      "Save Extra Copy of Original" never writes a second copy of a file Forge already saved. *(API, both settings;
+      `save_images=False` too.)*
+- [x] img2img result infotext has the prompt and `SeedVR2 …` keys; Forge's PNG Info parser (`/sdapi/v1/png-info`, the
+      tab with "Send to txt2img") reads them back from the saved file (the SeedVR2 keys are not read back into the
+      script's controls).
+- [x] `process_images` returning no images → a clear message, no traceback, VRAM released. *(Stubbed `run()` only —
+      cannot be produced through the API; the return happens before any SeedVR2 model is loaded.)*
+- [x] Interrupt during the upscale of a batch → every image comes back (the not-upscaled ones as their inputs with
+      `SeedVR2 Error: Interrupted`), the gallery count matches, models unloaded. *(API, img2img with 2 images; VRAM
+      0.59 GB after. txt2img uses the same code path after the base images.)*
 - [ ] All tests pass (`uv run … python -m pytest tests -q`), new helpers covered including hostile inputs
       (0 images, grid only, extras after batch, odd modes, 1×1 image, huge index).
 
@@ -82,7 +88,9 @@ the upscale → 2 inputs back with `SeedVR2 Error: Interrupted`, no files; txt2i
 images, 4 seeds, 4 `-seedvr2` files, no `-original` duplicate; txt2img with "Always save" off → no files. VRAM after
 each run 0.55–0.85 GB. The live run found that `create_infotext` fails with the checkpoint unloaded → infotexts are
 now built from Forge's base infotext (`BaseInfotext`).
-Left for the owner (UI only): "Send to txt2img" from an img2img result; img2img Batch tab with 2 files.
+PNG Info parse of saved files (img2img from the UI, txt2img from the API): prompt, Forge's seed/steps, SeedVR2 keys.
+Batch tab by the owner: 2 files in → 2 `-seedvr2` files out (1080 px), but in a date subfolder — fixed (`save_to_dirs`
+override passed on), re-check pending.
 Empty base result: stubs only (cannot be produced through the API).
 
 ## Agreed with the owner

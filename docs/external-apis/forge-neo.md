@@ -192,8 +192,7 @@ quotes are short fragments).
 - **Prompt/seed lists:** `p.setup_prompts()` (method of the base class) sets `all_prompts`, `all_negative_prompts`, `main_prompt`,
   `main_negative_prompt` (`batch_size * n_iter * [prompt]`). `all_seeds` and `all_subseeds` are set only in `process_images_inner`
   (after `setup_prompts()`, before `p.scripts.process(p)`). `StableDiffusionProcessingImg2Img.init` sets none of these.
-  So in img2img without `process_images`, these lists do not exist until the script sets them (call `p.setup_prompts()` and build
-  the seed lists itself, or pass lists to `create_infotext`).
+  So in img2img without `process_images`, these lists are `None` (the dataclass default).
 - **Img2img Batch tab** (`modules/img2img.py`, `process_batch`): calls `processing.fix_seed(p)` once; per file builds
   `p.init_images = [img] * p.batch_size`; with an output dir sets `p.outpath_samples = output_dir` and
   `p.override_settings["save_to_dirs"] = False`; runs `proc = modules.scripts.scripts_img2img.run(p, *args)` and falls back to
@@ -223,6 +222,21 @@ quotes are short fragments).
   `do_not_save_grid = not save_images` set on `p` (then `save_images` popped); with `send_images` false no images are returned, else
   `encode_pil_to_base64` over `processed.images + processed.extra_images`; `info` in the response is `processed.js()`
   (carries `infotexts`; there is no separate `infotexts` field). A selectable script runs through the script runner, else `process_images(p)`.
+- **`p.save_samples(*, is_video=False)`** = `opts.samples_save and not do_not_save_samples and (opts.save_incomplete_images
+  or not state.interrupted and not state.skipped) and not (is_video and not opts.video_save_frames)`. `state.skipped` is reset
+  only at the top of each batch, so after a Skip on the last txt2img batch it is still set when a script runs afterwards.
+  Source: local Neo checkout, `modules/processing.py:495-497`.
+- **`override_settings` are applied only inside `process_images`** and restored afterwards when
+  `p.override_settings_restore_afterwards` (default True). `save_image` itself reads only
+  `p.override_settings["samples_filename_pattern"]`; `save_to_dirs=None` falls back to the global `opts.save_to_dirs`.
+  Source: local Neo checkout, `modules/processing.py:182, 836-840`; `modules/images.py:704-722`.
+- **API defaults:** `save_images` defaults to `False`, `send_images` to `True` (txt2img and img2img request models).
+  Source: local Neo checkout, `modules/api/models.py:91-92, 110-111`.
+- **Comments under the result:** `p.comment(text)` adds to `p.comments`; `Processed` joins them into `processed.comments`
+  (shown in the UI under the generation info). Source: local Neo checkout, `modules/processing.py:317-318, 510`.
+- **Unsaved images carry `image.info`:** the gallery's temp-file writer (`modules/ui_tempdir.py`, `save_pil_to_file`) and the
+  API's `encode_pil_to_base64` copy `pil_image.info` into the PNG; an image with `already_saved_as` is served from that file.
+  Source: local Neo checkout, `modules/ui_tempdir.py:27-48`, `modules/api/api.py:106`.
 - **State** (`modules/shared_state.py`): `skipped` exists (class attribute `False`; `skip()` sets it, `begin()` resets it).
   `job_count` (`begin()` sets -1, `end()` sets 0), `job_no` (`begin()` sets 0), `nextjob()` increments `job_no` and resets step
   counters. `process_images_inner` sets `state.job_count = p.n_iter` only `if state.job_count == -1`, calls `state.nextjob()` after each
@@ -243,6 +257,5 @@ quotes are short fragments).
 - Whether `p.seed == -1` is resolved before `run()` in single-image img2img and txt2img: `fix_seed` is defined in `modules/processing.py`
   but not called in `img2img_function` / `txt2img_function` or `process_images*` (they call `get_fixed_seed`); only `process_batch`
   calls it. A script that reads `p.seed` before `process_images` should call `processing.fix_seed(p)` itself (not confirmed as needed).
-- Default value of `save_images` in the API request models (`modules/api/models.py`) was not read.
 - The handler of `{tab}_generation_info_button` is read (see "Results, infotexts and saving"), but the JS `selected_gallery_index()` was not.
 - Behaviour of the "Extras" postprocessing API (`scripts_postprocessing.ScriptPostprocessing`) in Neo — needed for the Extras idea.

@@ -78,9 +78,13 @@ No Forge, Gradio or torch imports; tested outside Forge.
 - `loaded_models.py` — `ModelFileIdentity` (path, size, mtime) and `LoadedModelTracker`: which files the cached models came from.
 - `model_lifecycle.py` — `ModelLifecycle`: drops the vendored cache before a run (Force Reload, other files) and after it
   (Unload, error, interrupt), then releases memory through a function the script passes in.
-- `run_inputs.py` (Pillow only) — `select_generated_images` (skip the grid and extras), `select_distinct_images`
-  (Batch tab repeats), `to_pipeline_image` (any mode → RGB / RGBA), `group_by_shape`, `resolve_seed`.
-- `run_results.py` — `plan_saving` → `SavePlan`; `GenerationParam` keys and `seedvr2_generation_params` /
+- `run_inputs.py` (Pillow, numpy) — `select_generated_images` (skip the grid and extras), `select_distinct_images`
+  (Batch tab repeats), `to_pipeline_image` (any mode → RGB / RGBA), `group_by_shape`, `split_into_passes`
+  (`PASS_BUDGET_PIXELS`), `resolve_seed` / `parse_seed` / `is_unusable_seed`.
+- `upscale_settings.py` — slider `Bounds` (resolution, noise, tile size and overlap) and `parse_upscale_settings` →
+  `UpscaleSettings`, clamped to those bounds; the script builds its sliders from the same bounds.
+- `run_results.py` — `plan_saving` → `SavePlan`; `read_option` (a Forge option with the request's `override_settings`);
+  `GenerationParam` keys and `seedvr2_generation_params` /
   `failure_generation_params`; `merge_run_images` → `RunImage` list (one per input); `BaseInfotext` (prompt part +
   parameters line, from Forge's infotext or a bare prompt) and `InputDetails` (seed, prompt, base infotext per input).
 
