@@ -22,8 +22,7 @@ PROGRESS = (sum of weights of ✅ blocks) / (sum of weights of ALL blocks) × 10
 
 ## Summary
 
-**Sum of weights: 32. Closed: 21. PROGRESS: 65%.** (B09 closed at 91%; then the owner added B10, B11, B12 and grew B08 —
-the project grew, it did not go backwards.)
+**Sum of weights: 32. Closed: 22. PROGRESS: 68%.**
 
 ## Delivery requirements (REQ-1…REQ-6, details — `docs/01-VISION.md`)
 
@@ -34,7 +33,7 @@ the project grew, it did not go backwards.)
 | B06 | VRAM and RAM lifecycle: unload SeedVR2 after run, real Force Reload, release reserved VRAM between phases, Forge device, context reset on error, pipeline import before any work (before the base image and the SD unload), BlockSwap/offload in the UI and a 7B warning on 8 GB GPUs | REQ-3, REQ-4 | 4 | ✅ | — |
 | B07 | Correct results: every image of a batch (not the grid), RGB conversion, infotext, respect save settings, empty-result guard | REQ-2 | 3 | ✅ | — |
 | B09 | Tests with Forge stubs + GitHub Actions (pytest) | REQ-6 | 3 | ✅ | — |
-| B10 | VAE tile 512 as the default (closes the tile-1024 stall on 8 GB with `--cuda-malloc`): renamed slider so existing users get it too (Forge's saved UI values — fact-check first), live re-measure by Claude | REQ-4 | 1 | ⬜ | all |
+| B10 | VAE tile 512 as the default (closes the tile-1024 stall on 8 GB with `--cuda-malloc`): renamed slider so existing users get it too (Forge's saved UI values — fact-check first), live re-measure by Claude | REQ-4 | 1 | ✅ | — |
 
 ## UX
 
@@ -55,7 +54,7 @@ the project grew, it did not go backwards.)
 ## How to check the sum
 Add up the "Weight" column across all tables — it must match "Sum of weights" in "Summary":
 B04 2 + B05 2 + B06 4 + B07 3 + B09 3 + B10 1 + B11 2 + B08 3 + B12 5 + B01 3 + B02 3 + B03 1 = **32**.
-Add up the weights of ✅ rows — that is "Closed": B01 3 + B02 3 + B03 1 + B04 2 + B05 2 + B06 4 + B07 3 + B09 3 = **21**.
+Add up the weights of ✅ rows — that is "Closed": B01 3 + B02 3 + B03 1 + B04 2 + B05 2 + B06 4 + B07 3 + B09 3 + B10 1 = **22**.
 
 ## Why this order
 B05 first: a wrong model folder leaves users with empty dropdowns, the most common first-run failure. B04 removed noise
