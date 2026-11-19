@@ -53,8 +53,11 @@ Usually you only need to choose the output size with **Output Size Mode**:
 
 In the Scale factor and Long edge modes the long edge never goes above 3840 px (larger sizes need a DiT that works in
 tiles, which is not there yet), and no image is made smaller than 512 px on its shortest edge, so ×1 of a small image
-is still an upscale. Images of different sizes in one img2img batch each get their own size. The console shows the
-size of each group, e.g. `[SeedVR2] 2 images 512x384 -> 1024x768`.
+is still an upscale. Images of different sizes in one img2img batch each get their own size.
+
+The line under the size controls shows the final size before you press Generate: in txt2img from the width, height
+and Hires. fix settings, in img2img from the image you loaded (the Batch tab says it depends on each image). The
+console also prints it per group of same-sized images, e.g. `[SeedVR2] 2 images 512x384 -> 1024x768`.
 
 - **txt2img** — the images are generated as usual (with all other extensions), then every image of the batch is
   upscaled with SeedVR2 (the grid is not upscaled, and no grid of the results is made).

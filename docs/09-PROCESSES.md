@@ -32,11 +32,19 @@ The source of truth is the code.
 4. 🔄 rescans and updates both dropdowns and the note; a selected file that is still there stays selected.
 5. Selecting a DiT reads its size from the header (process 5, step 6); a 7B on a CUDA GPU with less than 11 GiB total
    memory shows a note recommending BlockSwap. Unknown size or GPU → no note.
-6. Controls: seed, output size mode (Shortest edge — default / Scale factor / Long edge) with only the chosen
-   mode's control shown: resolution (shortest edge, 512–3840), scale factor (×1.0–×4.0, quick ×1.5 / ×2 / ×4
-   buttons), long edge (1024–3840 px); unload SD, save original, force reload, debug logs;
-   "After run" (Unload SeedVR2 — default / Keep in RAM), BlockSwap blocks (0–36), BlockSwap I/O layers (BlockSwap is on when either is set);
-   "Advanced": input/latent noise, VAE tiling, tile size and overlap.
+6. Controls: the size group — output size mode (Shortest edge — default / Scale factor / Long edge) with only the
+   chosen mode's control shown: resolution (shortest edge, 512–3840), scale factor (×1.0–×4.0, quick ×1.5 / ×2 / ×4
+   buttons), long edge (1024–3840 px) — and the output size line; "After run" (Unload SeedVR2 — default / Keep in
+   RAM), unload SD; BlockSwap blocks (0–36), BlockSwap I/O layers (BlockSwap is on when either is set);
+   "Advanced Settings": seed, save original, force reload, debug logs, input/latent noise, VAE tiling, tile size and
+   overlap. The order on screen is not the order of `run()`'s arguments (that is the returned list).
+7. Output size line (`seedvr2_neo/size_preview.py`): the size the upscale will give, from the same rules as the run.
+   txt2img: from Forge's width, height and Hires. fix controls (found by `elem_id` in `Script.after_component`;
+   Hires. fix size by Forge's formula, rounded to `res_step`), updated on any change of them or of the size
+   controls; without those controls (a UI layout setting can build the scripts first) a generic note. img2img: the
+   image size is read in the browser (`javascript/seedvr2.js`), updated on a size control change and, through the
+   hidden refresh button, within a second of the input image changing; no image or the Batch tab → "depends on each
+   input image".
 
 **Writes:** nothing.
 **On failure:** an unreadable folder counts as empty — the note is shown.

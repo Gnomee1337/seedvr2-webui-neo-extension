@@ -139,6 +139,11 @@ Live-checked on an 8 GB GPU without bf16, 16 GB RAM, 1080px output, VAE tile 512
   Forge's fields; B08 candidate). An img2img infotext has the prompt and the SeedVR2 keys, no Forge `Seed`.
 - 🟢 R2 (S1×L2) **`-original` copies and not-upscaled results are the converted input** (8-bit RGB / RGBA), not the
   file as given: a 16-bit, CMYK or palette input loses its original form there. The upscale itself needs the conversion.
+- 🟢 R2 (S1×L2) **The img2img size line depends on Forge Neo's page markup.** `javascript/seedvr2.js` finds the input
+  image with the selector Neo's own "Resize by" preview uses; if Neo changes it, the line falls back to "depends on
+  each input image" (the run is unaffected). The txt2img line needs Forge's width / height / Hires. fix `elem_id`s;
+  without them it stays generic. Not shown before a run: the old Hires. fix behaviour option
+  (`use_old_hires_fix_width_height`), where the line assumes the current behaviour.
 - 🟢 R1 (S1×L1) **A size mode saved as a UI default shows the wrong slider at start.** Forge applies a value saved in
   `ui-config.json` (Settings → Defaults) to "Output Size Mode" after the UI is built, while the columns' visibility comes
   from the code default, so the shortest-edge slider shows until the mode is clicked again. The run uses the saved mode.

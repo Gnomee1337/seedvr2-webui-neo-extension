@@ -66,7 +66,15 @@ None of its own: the UI lives inside the txt2img / img2img tabs.
 - `seedvr2_script.py` — the Forge side: UI controls, the model refresh button and the 7B low-VRAM note, the model
   check and pipeline import before a run, collecting the images to upscale (txt2img base images / img2img inputs),
   the SD unload, the process-wide `MODEL_LIFECYCLE`, Forge's hooks for the run (`forge_hooks`: device, memory release,
-  `shared.state.interrupted`), saving (`-seedvr2`, `-original`) and Forge's `Processed`.
+  `shared.state.interrupted`), saving (`-seedvr2`, `-original`) and Forge's `Processed`. The output size preview:
+  `after_component` keeps Forge's txt2img width / height / Hires. fix controls (by `elem_id`), whose changes update
+  the size line; in img2img the browser reads the image size.
+
+### javascript/, style.css
+Loaded by Forge into the page (any extension's `javascript/*.js` and `style.css`).
+- `javascript/seedvr2.js` — the img2img input image size read from the page (`seedvr2Img2imgPreview`, the `_js` of the
+  preview events), and a once-a-second check that presses the hidden refresh button when that size changes.
+- `style.css` — the hidden refresh button, the size group, the quick scale buttons, the highlighted size line.
 
 ### seedvr2_neo/
 No Forge or Gradio imports; torch only in `upscale_run.py`. Tested outside Forge.
@@ -81,6 +89,8 @@ No Forge or Gradio imports; torch only in `upscale_run.py`. Tested outside Forge
 - `run_inputs.py` (Pillow, numpy) — `select_generated_images` (skip the grid and extras), `select_distinct_images`
   (Batch tab repeats), `to_pipeline_image` (any mode → RGB / RGBA), `group_by_shape`, `split_into_passes`
   (`PASS_BUDGET_PIXELS`, output pixels per input size from the caller), `resolve_seed` / `parse_seed` / `is_unusable_seed`.
+- `size_preview.py` — `describe_output_size` (the size line shown before a run, through `UpscaleSettings.target_for`)
+  and `txt2img_final_size` (width x height, or the Hires. fix size by Forge's formula and `res_step`).
 - `upscale_settings.py` — slider `Bounds` (resolution, scale factor, long edge, noise, tile size and overlap),
   `SizeMode` (Shortest edge / Scale factor / Long edge) and `parse_upscale_settings` → `UpscaleSettings`, clamped to
   those bounds; the script builds its sliders from the same bounds. `UpscaleSettings.target_for(size)` →
