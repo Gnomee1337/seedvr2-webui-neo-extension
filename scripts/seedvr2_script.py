@@ -193,31 +193,34 @@ class Script(scripts.Script):
                              outputs=[dit_model, vae_model, missing_models_note])
         dit_model.change(fn=self._update_vram_warning, inputs=[dit_model], outputs=[vram_warning_note])
 
-        with gr.Row():
-            seed = gr.Number(label="Seed (-1 = Random/Follow)", value=-1, precision=0)
+        # Layout only: Forge keys saved values (ui-config.json) by label, not by the rows or accordions around a
+        # control, and run() gets the controls in the order of the list returned below, not in the order shown.
+        with gr.Group(elem_classes=["seedvr2-section"]):
             size_mode = gr.Radio(label="Output Size Mode", choices=[mode.value for mode in SizeMode],
                                  value=DEFAULT_SIZE_MODE.value,
                                  info="Scale factor and Long edge keep the long edge at most "
                                       f"{MAX_OUTPUT_LONG_EDGE} px; no input is upscaled below 512 px")
-        # Only the active mode's control is shown. Forge keeps each one's value in ui-config.json under its label;
-        # the shortest edge slider keeps its old label so the values users saved still apply.
-        with gr.Row():
+            # Only the active mode's control is shown. The shortest edge slider keeps its old label so the values
+            # users saved still apply.
             with gr.Column(visible=DEFAULT_SIZE_MODE is SizeMode.SHORTEST_EDGE) as shortest_edge_controls:
                 resolution = gr.Slider(label="Upscale Resolution (Shortest Edge)", **slider_range(RESOLUTION))
             with gr.Column(visible=DEFAULT_SIZE_MODE is SizeMode.SCALE_FACTOR) as scale_factor_controls:
-                scale_factor = gr.Slider(label="Scale Factor", **slider_range(SCALE_FACTOR))
-                with gr.Row():
+                with gr.Row(elem_classes=["seedvr2-quick-scale-row"]):
+                    scale_factor = gr.Slider(label="Scale Factor", scale=1, **slider_range(SCALE_FACTOR))
                     for factor in QUICK_SCALE_FACTORS:
-                        gr.Button(value=f"×{factor:g}", size="sm").click(fn=lambda factor=factor: factor,
-                                                                        inputs=[], outputs=[scale_factor])
+                        gr.Button(value=f"×{factor:g}", size="sm", scale=0, min_width=56,
+                                  elem_classes=["seedvr2-quick-scale"]).click(fn=lambda factor=factor: factor,
+                                                                              inputs=[], outputs=[scale_factor])
             with gr.Column(visible=DEFAULT_SIZE_MODE is SizeMode.LONG_EDGE) as long_edge_controls:
                 long_edge = gr.Slider(label="Output Long Edge (px)", **slider_range(LONG_EDGE))
+            size_controls = [resolution, size_mode, scale_factor, long_edge]
+            txt2img_inputs = None if is_img2img else self._txt2img_preview_inputs(size_controls)
+            output_size_note = gr.Markdown(
+                UNKNOWN_SOURCE_NOTE if txt2img_inputs is None
+                else preview_txt2img_output_size(*(component.value for component in txt2img_inputs)),
+                elem_classes=["seedvr2-size-note"])
         size_mode.change(fn=self._show_size_controls, inputs=[size_mode],
                          outputs=[shortest_edge_controls, scale_factor_controls, long_edge_controls])
-        size_controls = [resolution, size_mode, scale_factor, long_edge]
-        txt2img_inputs = None if is_img2img else self._txt2img_preview_inputs(size_controls)
-        output_size_note = gr.Markdown(UNKNOWN_SOURCE_NOTE if txt2img_inputs is None else
-                                       preview_txt2img_output_size(*(component.value for component in txt2img_inputs)))
         if is_img2img:
             self._preview_img2img_output_size(output_size_note, size_controls)
         elif txt2img_inputs is not None:
@@ -226,31 +229,33 @@ class Script(scripts.Script):
                                  show_progress="hidden")
 
         with gr.Row():
-            unload_sd = gr.Checkbox(label="Unload SD Checkpoint", value=True, elem_classes="force-unload",
-                                    info="Frees VRAM; the checkpoint reloads on the next generation")
-            save_original = gr.Checkbox(label="Save Extra Copy of Original", value=False,
-                                        info="img2img: also saves the input image; txt2img images are saved by Forge")
-            force_reload = gr.Checkbox(label="Force Reload", value=False)
-            debug_mode = gr.Checkbox(label="Show Debug Logs", value=False)
-
-        with gr.Row():
             after_run = gr.Radio(label="After run", choices=[option.value for option in AfterRun],
                                  value=AfterRun.UNLOAD.value,
                                  info="Unload frees VRAM and RAM; Keep in RAM makes the next run start faster but "
                                       "holds RAM the size of the model files")
+            unload_sd = gr.Checkbox(label="Unload SD Checkpoint", value=True, elem_classes="force-unload",
+                                    info="Frees VRAM; the checkpoint reloads on the next generation")
+        with gr.Row():
             blocks_to_swap = gr.Slider(label="BlockSwap: DiT blocks kept in RAM", minimum=0,
                                        maximum=MAX_BLOCKS_TO_SWAP, step=1, value=0)
             swap_io_components = gr.Checkbox(label="BlockSwap: I/O layers too", value=False,
                                              info="Turns BlockSwap on even with 0 blocks; saves little VRAM")
 
-        with gr.Accordion("Advanced Settings (Noise & Tiling)", open=False):
+        with gr.Accordion("Advanced Settings", open=False):
+            with gr.Row():
+                seed = gr.Number(label="Seed (-1 = Random/Follow)", value=-1, precision=0)
+                save_original = gr.Checkbox(label="Save Extra Copy of Original", value=False,
+                                            info="img2img: also saves the input image; txt2img images are saved by "
+                                                 "Forge")
+                force_reload = gr.Checkbox(label="Force Reload", value=False,
+                                           info="Reads the model files again; matters only with Keep in RAM")
+                debug_mode = gr.Checkbox(label="Show Debug Logs", value=False)
             with gr.Row():
                 input_noise = gr.Slider(label="Input Noise Scale", **slider_range(NOISE))
                 latent_noise = gr.Slider(label="Latent Noise Scale", **slider_range(NOISE))
-
-            gr.Markdown("ℹ️ **Tiling reduces VRAM usage for huge resolutions.**")
             with gr.Row():
-                use_tile_vae = gr.Checkbox(label="Enable VAE Tiling", value=USE_TILE_VAE_DEFAULT)
+                use_tile_vae = gr.Checkbox(label="Enable VAE Tiling", value=USE_TILE_VAE_DEFAULT,
+                                           info="Less VRAM for large images")
                 # Forge keeps a slider's value in ui-config.json under its label and prefers it to the code default;
                 # this label is not "Tile Size" so the 1024 saved by older versions does not override the 512 default.
                 # Do not rename it back; any later label change resets the users' saved value again.

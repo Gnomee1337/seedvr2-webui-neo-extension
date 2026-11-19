@@ -1,4 +1,43 @@
+/* SeedVR2 script UI. Colours come from Gradio's theme variables, so light and dark themes both work. */
+
 /* The hidden button javascript/seedvr2.js presses to refresh the img2img output size preview. */
 .seedvr2-hidden {
     display: none !important;
+}
+
+/* The output size group: mode, its control and the final size, set apart from the memory settings below. */
+.seedvr2-section {
+    border: 1px solid var(--border-color-primary) !important;
+    border-radius: var(--radius-lg) !important;
+    margin: 6px 0 !important;
+    overflow: hidden;
+}
+
+/* The quick ×1.5 / ×2 / ×4 buttons sit at the slider's level, not stretched across the row. */
+.seedvr2-quick-scale-row {
+    align-items: flex-end !important;
+    gap: 4px !important;
+}
+
+.seedvr2-quick-scale {
+    align-self: center !important;
+    min-width: 52px !important;
+    max-width: 64px !important;
+    font-weight: 600;
+}
+
+/* The final output size, as a highlighted line under the size controls. */
+.seedvr2-size-note {
+    padding: 8px 12px !important;
+    background: var(--background-fill-secondary) !important;
+    border-left: 3px solid var(--color-accent) !important;
+}
+
+.seedvr2-size-note p {
+    margin: 0 !important;
+}
+
+.seedvr2-size-note strong {
+    color: var(--color-accent);
+    font-size: 1.1em;
 }

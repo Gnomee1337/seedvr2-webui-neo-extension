@@ -55,7 +55,7 @@ class Component:
 
 def make_gradio() -> types.ModuleType:
     gradio = types.ModuleType("gradio")
-    for name in ("Row", "Column", "Accordion", "Dropdown", "Markdown", "Number", "Slider", "Checkbox", "Radio", "Button"):
+    for name in ("Row", "Column", "Group", "Accordion", "Dropdown", "Markdown", "Number", "Slider", "Checkbox", "Radio", "Button"):
         setattr(gradio, name, type(name, (Component,), {}))
     gradio.update = lambda **kwargs: {"__type__": "update", **kwargs}
     return gradio
