@@ -153,6 +153,8 @@ Live-checked on an 8 GB GPU without bf16, 16 GB RAM, 1080px output, VAE tile 512
   CI red with no change here. A pull request from a branch of this repository runs twice (push + pull_request).
 - 🟢 R2 (S1×L2) **Over the size guideline:** `UpscaleRun._upscale_tensor` (~70 lines, mostly the pipeline's keyword
   arguments, moved as is), `Script.run` (~47 lines), `tests/scripts/forge_stubs.py` (~430 lines of stand-ins).
+- 🟢 R1 (S1×L1) **All result images are built before any is saved** (`build_result`): if building one raises (e.g. out
+  of memory on `copy()`), no upscaled file of that run is written; the run fails either way.
 - 🟢 R1 (S1×L1) **The script-test stand-ins still import the real `seedvr2_vendor`, `.core`, `.utils` packages** (only
   the leaf modules are replaced); their `__init__.py` files are empty today. If an upstream sync adds imports there,
   the script tests start importing the real pipeline.

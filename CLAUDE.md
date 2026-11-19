@@ -40,7 +40,7 @@ Then wait for a command.
 
 - **Stack:** Python 3.10+ inside the Forge Neo process; PyTorch, Gradio (Forge's), OmegaConf, einops, diffusers,
   `rotary-embedding-torch`, `gguf`. Tests: `pytest` outside Forge (`requirements-dev.txt`), `tests/` mirroring the
-  code folders; the script runs in tests against stand-ins of Forge (`tests/scripts/forge_stubs.py`); CI — GitHub Actions on every push. **Changed code — update or add tests in the mirrored
+  code folders; the script runs in tests against stand-ins of Forge (`tests/scripts/forge_stubs.py`); CI — GitHub Actions on every push and pull request. **Changed code — update or add tests in the mirrored
   folder in the same commit** (details — `docs/process/code-style.md`).
 
 - **Language:** documentation, comments, docstrings, commit messages — English; communication with

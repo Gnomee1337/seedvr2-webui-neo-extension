@@ -314,7 +314,7 @@ def test_sd_checkpoint_is_unloaded_only_when_asked(script, make_txt2img, forge):
 def test_models_are_unloaded_after_a_run_by_default(script, make_txt2img, pipeline):
     run(script, make_txt2img())
     assert pipeline.runner_kwargs[0]["dit_cache"] is False and pipeline.runner_kwargs[0]["vae_cache"] is False
-    assert pipeline.cache.removed[-2:] == CACHE_IDS  # dropped after the run
+    assert pipeline.cache.removed == CACHE_IDS * 2  # dropped before the run (nothing trusted yet) and after it
 
 
 def test_the_run_uses_forge_device_and_releases_memory(script, make_txt2img, forge, pipeline):
@@ -380,15 +380,18 @@ def test_run_accepts_the_arguments_of_an_older_ui(script, make_txt2img):
 # --- the calls into the vendored pipeline ----------------------------------------------------------------------------
 
 def real_parameters(module_name, function_name):
-    """Positional parameter names, keyword names and whether `**kwargs` is accepted, read from the vendored source
-    (not imported: it needs the pipeline's packages)."""
+    """Positional parameter names, keyword names, required names and whether `**kwargs` is accepted, read from the
+    vendored source (not imported: it needs the pipeline's packages)."""
     path = os.path.join(REPO_ROOT, *module_name.split(".")) + ".py"
     with open(path, encoding="utf-8") as source:
         tree = ast.parse(source.read())
     function = next(node for node in tree.body if isinstance(node, ast.FunctionDef) and node.name == function_name)
-    positional = [arg.arg for arg in function.args.posonlyargs + function.args.args]
-    keywords = positional + [arg.arg for arg in function.args.kwonlyargs]
-    return positional, keywords, function.args.kwarg is not None
+    arguments = function.args
+    positional = [arg.arg for arg in arguments.posonlyargs + arguments.args]
+    keywords = positional + [arg.arg for arg in arguments.kwonlyargs]
+    required = positional[:len(positional) - len(arguments.defaults)] + [
+        arg.arg for arg, default in zip(arguments.kwonlyargs, arguments.kw_defaults) if default is None]
+    return positional, keywords, required, arguments.kwarg is not None
 
 
 def test_every_pipeline_call_fits_the_real_vendored_signature(script, make_txt2img, pipeline):
@@ -397,7 +400,9 @@ def test_every_pipeline_call_fits_the_real_vendored_signature(script, make_txt2i
     called = {(call.module, call.function) for call in pipeline.calls}
     assert called == {(module, name) for module, names in PIPELINE_FUNCTIONS.items() for name in names}
     for call in pipeline.calls:
-        positional, keywords, takes_any_keyword = real_parameters(call.module, call.function)
+        positional, keywords, required, takes_any_keyword = real_parameters(call.module, call.function)
         assert call.positional_count <= len(positional), call
+        supplied = set(positional[:call.positional_count]) | set(call.keywords)
+        assert set(required) <= supplied, (call, set(required) - supplied)
         assert takes_any_keyword or set(call.keywords) <= set(keywords), (call, set(call.keywords) - set(keywords))
         assert not set(call.keywords) & set(positional[:call.positional_count]), call
