@@ -2,7 +2,7 @@
 
 ## Where we stopped
 
-**B09 closed** on branch `feature/b09-forge-stubs-ci` (pushed; CI green); merge into `main` waits for the owner's consent.
+**B09 closed** and merged into `main` with the owner's consent (CI green on Python 3.10 and 3.13).
 
 What B09 changes: no user-visible behavior change. `Script.run()` is tested against stand-ins of Forge, Gradio and the
 pipeline (`tests/scripts/`), including every keyword sent to the vendored pipeline checked against its source; the script
@@ -27,9 +27,8 @@ requirements-dev.txt python -m pytest tests -q` (pulls CPU torch on Windows). CI
 
 ## Next steps
 
-1. Owner's consent to merge `feature/b09-forge-stubs-ci` into `main` (no behavior change; CI green).
-2. Propose via `/idea`: VAE tile 512 as the default (🟠 R9) — it stalls runs on 8 GB GPUs with `--cuda-malloc`.
-3. B08 — settings and feedback (progress bar, interrupt inside the DiT step, SeedVR2 keys read back, title).
+1. Propose via `/idea`: VAE tile 512 as the default (🟠 R9) — it stalls runs on 8 GB GPUs with `--cuda-malloc`.
+2. B08 — settings and feedback (progress bar, interrupt inside the DiT step, SeedVR2 keys read back, title).
 
 Agreed with the owner: REQ-1…REQ-6, simplified Git Flow, ComfyUI files kept as in upstream (Forge Neo only),
 hardware target — 8 GB GPU without bf16, the whole repository under Apache-2.0, no grid of upscaled images. The fork is
