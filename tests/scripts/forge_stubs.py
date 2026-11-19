@@ -37,6 +37,7 @@ class Component:
     def __init__(self, *args, **kwargs):
         self.args = args
         self.kwargs = kwargs
+        self.value = kwargs.get("value", args[0] if args else None)
         self.events: List[Dict[str, Any]] = []
 
     def __enter__(self):
@@ -46,10 +47,10 @@ class Component:
         return False
 
     def click(self, fn=None, inputs=None, outputs=None, **kwargs):
-        self.events.append({"event": "click", "fn": fn, "inputs": inputs, "outputs": outputs})
+        self.events.append({"event": "click", "fn": fn, "inputs": inputs, "outputs": outputs, **kwargs})
 
     def change(self, fn=None, inputs=None, outputs=None, **kwargs):
-        self.events.append({"event": "change", "fn": fn, "inputs": inputs, "outputs": outputs})
+        self.events.append({"event": "change", "fn": fn, "inputs": inputs, "outputs": outputs, **kwargs})
 
 
 def make_gradio() -> types.ModuleType:
@@ -70,6 +71,7 @@ class Options:
         self.samples_format = "png"
         self.save_to_dirs = True
         self.enable_pnginfo = True
+        self.res_step = 64
         self.return_grid = True  # read by the stub `process_images` only
 
 

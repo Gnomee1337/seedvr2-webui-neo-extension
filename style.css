@@ -1,0 +1,4 @@
+/* The hidden button javascript/seedvr2.js presses to refresh the img2img output size preview. */
+.seedvr2-hidden {
+    display: none !important;
+}

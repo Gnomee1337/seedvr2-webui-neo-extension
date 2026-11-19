@@ -31,6 +31,7 @@ from seedvr2_neo.run_inputs import is_unusable_seed, resolve_seed, select_distin
 from seedvr2_neo.run_results import InputDetails, RunImage, SavePlan, describe_generated_inputs, \
     describe_uploaded_inputs, finish_images, merge_run_images, not_upscaled_comment, plan_saving, read_option, \
     seedvr2_generation_params
+from seedvr2_neo.size_preview import DEFAULT_RES_STEP, UNKNOWN_SOURCE_NOTE, describe_output_size, txt2img_final_size
 from seedvr2_neo.upscale_run import INTERRUPTED_MESSAGE, HostHooks, UpscaleRequest, UpscaleRun, import_pipeline
 from seedvr2_neo.upscale_settings import DEFAULT_SIZE_MODE, LONG_EDGE, MAX_OUTPUT_LONG_EDGE, NOISE, RESOLUTION, \
     SCALE_FACTOR, TILE_OVERLAP, TILE_SIZE, USE_TILE_VAE_DEFAULT, Bounds, SizeMode, parse_size_mode, \
@@ -42,6 +43,17 @@ ORIGINAL_SUFFIX = "-original"
 
 # The quick buttons next to the scale factor slider.
 QUICK_SCALE_FACTORS = (1.5, 2.0, 4.0)
+
+# Forge's txt2img controls (by elem_id) that decide the size of the image the upscale gets. The Hires. fix flag is the
+# hidden checkbox of an InputAccordion, which appends "-checkbox" to its elem_id.
+TXT2IMG_SIZE_SOURCES = {
+    "txt2img_width": "width", "txt2img_height": "height", "txt2img_hr": "enable_hr",
+    "txt2img_hr-checkbox": "enable_hr", "txt2img_hr_scale": "hr_scale", "txt2img_hr_resize_x": "hr_resize_x",
+    "txt2img_hr_resize_y": "hr_resize_y",
+}
+TXT2IMG_SOURCE_ORDER = ("width", "height", "enable_hr", "hr_scale", "hr_resize_x", "hr_resize_y")
+# The hidden button `javascript/seedvr2.js` presses when the img2img input image changes size.
+IMG2IMG_SIZE_REFRESH_ID = "seedvr2_img2img_size_refresh"
 
 # Forge options the script reads itself (with the request's `override_settings`).
 SAMPLES_SAVE_OPTION = "samples_save"
@@ -57,6 +69,19 @@ def scan_seedvr2_models() -> ModelScan:
 def slider_range(bounds: Bounds) -> Dict[str, float]:
     """Gradio slider arguments from the bounds `parse_upscale_settings` also enforces on API values."""
     return {"minimum": bounds.minimum, "maximum": bounds.maximum, "step": bounds.step, "value": bounds.default}
+
+
+def preview_txt2img_output_size(width, height, enable_hr, hr_scale, hr_resize_x, hr_resize_y, resolution, size_mode,
+                                scale_factor, long_edge) -> str:
+    """The output size line for txt2img: the upscale of the image Forge will make (after Hires. fix when it is on)."""
+    source = txt2img_final_size(width, height, enable_hr, hr_scale, hr_resize_x, hr_resize_y,
+                                getattr(shared.opts, "res_step", DEFAULT_RES_STEP))
+    return describe_output_size(source, resolution, size_mode, scale_factor, long_edge)
+
+
+def preview_img2img_output_size(width, height, resolution, size_mode, scale_factor, long_edge) -> str:
+    """The output size line for img2img; `width` and `height` come from the browser, 0 when there is no image."""
+    return describe_output_size((width, height), resolution, size_mode, scale_factor, long_edge)
 
 
 def empty_result(p, message: str) -> Processed:
@@ -189,6 +214,16 @@ class Script(scripts.Script):
                 long_edge = gr.Slider(label="Output Long Edge (px)", **slider_range(LONG_EDGE))
         size_mode.change(fn=self._show_size_controls, inputs=[size_mode],
                          outputs=[shortest_edge_controls, scale_factor_controls, long_edge_controls])
+        size_controls = [resolution, size_mode, scale_factor, long_edge]
+        txt2img_inputs = None if is_img2img else self._txt2img_preview_inputs(size_controls)
+        output_size_note = gr.Markdown(UNKNOWN_SOURCE_NOTE if txt2img_inputs is None else
+                                       preview_txt2img_output_size(*(component.value for component in txt2img_inputs)))
+        if is_img2img:
+            self._preview_img2img_output_size(output_size_note, size_controls)
+        elif txt2img_inputs is not None:
+            for component in txt2img_inputs:
+                component.change(fn=preview_txt2img_output_size, inputs=txt2img_inputs, outputs=[output_size_note],
+                                 show_progress="hidden")
 
         with gr.Row():
             unload_sd = gr.Checkbox(label="Unload SD Checkpoint", value=True, elem_classes="force-unload",
@@ -226,6 +261,40 @@ class Script(scripts.Script):
         return [dit_model, vae_model, seed, resolution, input_noise, latent_noise, force_reload, unload_sd, save_original,
                 use_tile_vae, tile_size, tile_overlap, debug_mode, after_run, blocks_to_swap, swap_io_components,
                 size_mode, scale_factor, long_edge]
+
+    def after_component(self, component, **kwargs):
+        """Keep the txt2img controls the output size preview reads; Forge calls this for every component it builds,
+        and builds them before the scripts' UI."""
+        elem_id = kwargs.get("elem_id")
+        if elem_id in TXT2IMG_SIZE_SOURCES and not isinstance(component, gr.Accordion):
+            self._size_sources()[TXT2IMG_SIZE_SOURCES[elem_id]] = component
+
+    def _size_sources(self) -> Dict[str, Any]:
+        if not hasattr(self, "_txt2img_size_sources"):
+            self._txt2img_size_sources = {}
+        return self._txt2img_size_sources
+
+    def _txt2img_preview_inputs(self, size_controls) -> Optional[List[Any]]:
+        """Forge's size controls followed by ours, in the order `preview_txt2img_output_size` takes them; None when
+        one of Forge's was not seen (a UI layout setting can build the scripts first), so the note stays generic."""
+        sources = self._size_sources()
+        if any(name not in sources for name in TXT2IMG_SOURCE_ORDER):
+            return None
+        return [sources[name] for name in TXT2IMG_SOURCE_ORDER] + size_controls
+
+    @staticmethod
+    def _preview_img2img_output_size(note, size_controls) -> None:
+        """Update `note` when a size control changes or the input image does. The image size is read in the browser
+        (`javascript/seedvr2.js`), so the image itself is not sent to the server; the script's JS presses the hidden
+        refresh button when the visible input image changes size."""
+        source_size = [gr.Number(value=0, visible=False), gr.Number(value=0, visible=False)]
+        refresh = gr.Button(value="Refresh output size", elem_id=IMG2IMG_SIZE_REFRESH_ID,
+                            elem_classes=["seedvr2-hidden"])
+        event = dict(fn=preview_img2img_output_size, _js="seedvr2Img2imgPreview", inputs=source_size + size_controls,
+                     outputs=[note], show_progress="hidden")
+        refresh.click(**event)
+        for component in size_controls:
+            component.change(**event)
 
     @staticmethod
     def _show_size_controls(size_mode):

@@ -330,7 +330,92 @@ Source for every line: local `neo` checkout (read in full at the cited file), fi
 - **`torchvision` is present in a Neo install:** `modules/launch_utils.py` installs `torch` and `torchvision` together
   (`torch_command`, line 288; reinstall check at line 313); `requirements.txt` lists `torch` only. Source: local Neo checkout.
 
+## Reading other components' values from a Script
+Source for every line: local `neo` checkout at commit `4f4284b` (files and lines named per item); Gradio 4.40.0 from the
+install's venv.
+- **Handles to other components: `Script.after_component(self, component, **kwargs)` / `before_component`**
+  (`modules/scripts.py:299-314`). They are called from Neo's patched `IOComponent_init` and `BlockContext_init`
+  (`modules/gradio_extensions.py:28-75`) for every component and container constructed while `scripts.scripts_current` is set
+  (set to the txt2img runner at `modules/ui.py:206`, to the img2img runner at `ui.py:481`, to `None` at `ui.py:830`).
+  `kwargs` are exactly the keyword arguments the component's constructor received (not read back from the component), so
+  `elem_id` is present when the builder passed it (all built-in ones do); `component.elem_id` is always readable after the call.
+  **Selectable scripts get these calls too**: `list_scripts_for_method` returns `self.scripts` (always-on plus selectable)
+  for `before_component` / `after_component`, other hooks only `alwayson_scripts` (`scripts.py:799-803`). A script is in
+  `self.scripts` for a tab only if `show(is_img2img)` is truthy there (`initialize_scripts`, `scripts.py:593-623`).
+  Each tab has its own runner and its own Script instance (`script_data.script_class()` per `initialize_scripts` call), so
+  the txt2img instance never sees img2img components. Errors in the hooks are caught and reported (`scripts.py:953-977`).
+  Alternative by id: `Script.on_after_component(callback, elem_id=...)` (`scripts.py:330-337`) calls `callback(OnComponent(component=...))`.
+  `scripts.script_callbacks.on_after_component` (`script_callbacks.py:568`) is global; it is not tied to a tab.
+- **Order: the script's `ui()` runs after the built-in components by default, so their handles exist by then, but this is
+  user-changeable.** `ScriptRunner.setup_ui()` is called in the `"scripts"` category branch (`ui.py:315-317` txt2img, `ui.py:661-663`
+  img2img). Categories come from `ordered_ui_categories()` (`ui.py:174-178`): built-in order is `prompt, image, inpaint, sampler,
+  accordions, checkboxes, dimensions, cfg, denoising, seed, batch, override_settings`, then script sections, then `scripts`
+  last (`modules/shared_items.py:85-113`). The setting `ui_reorder_list` ("selected items appear first", `shared_options.py:470`)
+  can move `scripts` (or any category) earlier, so a script must tolerate a missing handle. Both sliders and Hires. fix
+  components are therefore normally created before `ui()`; the handles must be collected in `after_component` (a Script has no other
+  way to find them), and `.change` / `.release` wiring can be done inside `ui()` once they are present.
+  Selectable scripts' `ui()` is called in `setup_ui` after the "Script" dropdown (`scripts.py:732-735`), inside a `gr.Group`.
+- **No Script method runs "after the whole UI is built".** `Script` hooks are `title/show/ui/before_component/after_component/...`;
+  `script_callbacks.on_before_ui` fires before the UI is created (`webui.py:61, 87`, before `ui.create_ui()`), `on_ui_tabs`
+  adds tabs, `on_app_started` fires after launch. For a txt2img/img2img script, wire events inside `ui()` (handles from
+  `after_component`), or in `after_component` of a later component. Each tab is its own `gr.Blocks` (`ui.py:209`, `ui.py:484`)
+  rendered into the page's `demo` (`ui.py:888-901`); `Blocks.render()` merges blocks and events into the root
+  (`gradio/blocks.py:1333-1380`), so events wired inside a tab's Blocks work after render (Neo's own code does this).
+- **txt2img `elem_id`s** (`modules/ui.py`): width `txt2img_width` (233), height `txt2img_height` (234), Hires. fix checkbox
+  `txt2img_hr` (253; an `InputAccordion`, its value is the enable flag), `txt2img_hr_scale` "Upscale by" (263, 1.0-4.0, step 0.05,
+  default 2.0), `txt2img_hr_resize_x` "Resize width to" (264), `txt2img_hr_resize_y` "Resize height to" (265) (0 = unset,
+  max 4096, step `res_step`). Width/height: min 64, max 4096, step `res_step`, default 1024.
+- **img2img `elem_id`s** (`modules/ui.py:516-538`): tab container `gr.Tabs(elem_id="mode_img2img")`; hidden
+  `img2img_selected_tab = gr.Number(value=0, visible=False)` (no elem_id; Python handle only, set by `tab.select` at line 559-560).
+  Tab index to source: 0 img2img (`ForgeCanvas elem_id="img2img_image"`), 1 Sketch (`img2img_sketch`), 2 Inpaint (`img2maskimg`),
+  3 Inpaint sketch (`inpaint_sketch`), 4 Inpaint upload (`gr.Image type="pil"`, `img_inpaint_base`; mask `img_inpaint_mask`),
+  5 Batch (files / directory). The mapping is `modules/img2img.py:183-209`. Width/height: `img2img_width`, `img2img_height`
+  (591-592, max 2048) inside the "Resize to" tab; "Resize by" has `img2img_scale` (598) and `selected_scale_tab`
+  (hidden Number, 0 = to, 1 = by). Neo's own live preview of the source size uses `_js="currentImg2imgSourceResolution"`
+  (`javascript/ui.js:435-443`): it reads `naturalWidth`/`height` of the visible `img`/`canvas` in `#mode_img2img`, so no image is
+  sent to Python; it returns `[w, h, r]` rounded with `sRound`, or `[0, 0, r]` with no image.
+- **`ForgeCanvas` is not a component.** It is a plain object (`modules_forge/forge_canvas/canvas.py:124-138`) with `.block`
+  (a `gr.HTML` carrying the `elem_id` you see above), `.foreground` and `.background` (both `LogicalImage`, a `gr.Textbox`
+  subclass, hidden, each `elem_id=self.uuid` = random `"uuid_<hex>"`, `elem_classes` `logical_image_foreground` / `logical_image_background`).
+  Consequently a Script cannot find the background by the documented `elem_id`: in `after_component` the `gr.HTML` with
+  `elem_id="img2img_image"` is followed immediately by the foreground and then the background `LogicalImage`, distinguishable
+  by `kwargs["elem_classes"]` (order-based, fragile).
+- **Value an event handler gets from `canvas.background`:** `LogicalImage.preprocess` (`canvas.py:98-109`) decodes a
+  `data:image/png;base64,...` string and returns a **PIL `RGBA` image** (`numpy=False` is the `ForgeCanvas` default, `numpy=True`
+  gives an ndarray), or `None` when the payload is not such a string (empty canvas). Not a dict and not base64 in the handler.
+  The browser sends the full PNG as base64 on every event that has it in `inputs`. `.change` can be attached (Textbox event; Neo
+  does `i.change(fn=updateWH, inputs=[i], ...)` on `init_img.background` etc., `ui.py:622-625`; the handler uses `img.size`).
+  There is no `.upload` (not a Textbox event); `change` is the hook. `init_img_inpaint` (tab 4) is a normal `gr.Image(type="pil")`.
+  Sketch tab: `background` is the image, `foreground` the strokes; the final image is `Image.alpha_composite(bg, fg)` (`img2img.py:195`).
+  Not verified live: whether `change` fires when the user clears the canvas or switches tabs.
+- **Hires. fix final size** (`StableDiffusionProcessingTxt2Img.calculate_target_resolution`, `modules/processing.py:1254-1282`):
+  - both `hr_resize_x == 0 and hr_resize_y == 0`: `to_x = sRound(width * hr_scale)`, `to_y = sRound(height * hr_scale)`;
+  - only `hr_resize_x` set: `to_x = resize_x`, `to_y = resize_x * height / width`, then both `sRound`ed;
+  - only `hr_resize_y` set: `to_x = resize_y * width / height`, `to_y = resize_y`, then both `sRound`ed;
+  - both set: `to_x = resize_x`, `to_y = resize_y` (taken as is, no aspect preservation, `sRound`ed). Crop/fit for this case was
+    not read (the second pass targets `hr_upscale_to_x/y`, `processing.py:1448-1449`); `hr_scale` is ignored whenever either resize is non-zero.
+  - **`sRound(val) = math.floor(val / _STEP + 0.5) * _STEP`, with `_STEP = int(opts.res_step)`** (`modules/ui.py:95-99`;
+    `processing.py` imports it from `modules.ui`, line 35). So rounding is to the **Resolution Step (default 64; choices 8-256)**,
+    round-half-up, not to a multiple of 8. A tiny size rounds to 0.
+  - With option `use_old_hires_fix_width_height` (default off, `shared_options.py:297`) width/height become the final size and the
+    first pass is shrunk (`processing.py:1255-1262`, `old_hires_fix_first_pass_dimensions` line 1191); the formula above then does
+    not apply.
+  - Neo already shows this value: `calc_resolution_hires(enable, width, height, hr_scale, hr_resize_x, hr_resize_y)` (`ui.py:102-112`)
+    builds a `StableDiffusionProcessingTxt2Img`, calls `calculate_target_resolution()` and returns
+    `sRound(p.hr_resize_x or p.hr_upscale_to_x)` x `sRound(p.hr_resize_y or p.hr_upscale_to_y)`; wired on `.release` for sliders
+    and `.change` for the checkbox (`ui.py:322-332`). A script can import and reuse `modules.ui.calc_resolution_hires` / `sRound`
+    instead of duplicating the formula (it returns an HTML string, so `sRound` plus the formula is the reusable part).
+  - Without Hires. fix the txt2img result size is `width` x `height` unrounded (the sliders already step by `res_step`).
+- **Gradio 4.40.0 (`gradio/components/markdown.py`):** `Markdown.postprocess(value)` "Expects a valid `str`" and strips whitespace,
+  so a handler may return a plain string or `gr.update(value=...)` for a `gr.Markdown` output (the `update` form is the same mechanism
+  Neo uses for Dropdown). Inputs from another Block: events attach to component ids and the Blocks are merged on `render()`
+  (see above); an `inputs=` component from a different tab's Blocks is not demonstrated by Neo's code and was not tested.
+  A script only needs components of its own tab.
+
 ## Not verified
+- Live behaviour of the `change` event of `LogicalImage` on clear / tab switch; and whether an `inputs=` component of another tab's
+  Blocks works in Gradio 4.40 (propose: a tiny test script in a live Forge, check the request payload in the browser network tab).
+- Crop/fit when both Hires. fix resize values are set (second-pass code after `processing.py:1484` not read).
 - The launch flag name: `backend/args.py` defines `--gpu-device-id`, while a read of `modules/cmd_args.py` showed `--device-id`
   (str); which one Neo's launcher actually accepts, and whether both exist, was not settled.
 - Where `unload_all_models()` puts the weights (CPU RAM or dropped): `backend/patcher/base` (`detach`, `partially_unload`) not read.

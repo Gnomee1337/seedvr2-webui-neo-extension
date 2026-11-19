@@ -503,3 +503,83 @@ def test_every_pipeline_call_fits_the_real_vendored_signature(script, make_txt2i
         assert set(required) <= supplied, (call, set(required) - supplied)
         assert takes_any_keyword or set(call.keywords) <= set(keywords), (call, set(call.keywords) - set(keywords))
         assert not set(call.keywords) & set(positional[:call.positional_count]), call
+
+
+# --- output size preview ---------------------------------------------------------------------------------------------
+
+def forge_txt2img_size_controls(script, gr, width=512, height=384, enable_hr=False, hr_scale=2.0):
+    """Forge's txt2img size controls as Forge builds them before the scripts' UI, passed to `after_component`."""
+    controls = {
+        "txt2img_width": gr.Slider(value=width, elem_id="txt2img_width"),
+        "txt2img_height": gr.Slider(value=height, elem_id="txt2img_height"),
+        "txt2img_hr-checkbox": gr.Checkbox(value=enable_hr, elem_id="txt2img_hr-checkbox"),
+        "txt2img_hr_scale": gr.Slider(value=hr_scale, elem_id="txt2img_hr_scale"),
+        "txt2img_hr_resize_x": gr.Slider(value=0, elem_id="txt2img_hr_resize_x"),
+        "txt2img_hr_resize_y": gr.Slider(value=0, elem_id="txt2img_hr_resize_y"),
+    }
+    script.after_component(gr.Accordion(elem_id="txt2img_hr"), elem_id="txt2img_hr")  # the accordion is not the flag
+    for elem_id, component in controls.items():
+        script.after_component(component, **component.kwargs)
+    return controls
+
+
+def output_size_note(script, is_img2img):
+    """The Markdown the preview writes to: the first Markdown created after the size controls."""
+    created = []
+    gr = sys.modules["gradio"]
+    markdown_class = gr.Markdown
+
+    def recording_markdown(*args, **kwargs):
+        created.append(markdown_class(*args, **kwargs))
+        return created[-1]
+
+    gr.Markdown = recording_markdown
+    try:
+        components = script.ui(is_img2img=is_img2img)
+    finally:
+        gr.Markdown = markdown_class
+    note = next(markdown for markdown in created if str(markdown.value).startswith("Output size"))
+    return note, {component.kwargs["label"]: component for component in components}
+
+
+def test_txt2img_preview_starts_with_the_size_of_forge_s_controls(script):
+    forge_txt2img_size_controls(script, sys.modules["gradio"], width=832, height=1216)
+    note, _ = output_size_note(script, is_img2img=False)
+    assert note.value == "Output size: **1080×1578** from 832×1216"
+
+
+def test_txt2img_preview_follows_every_size_control(script):
+    forge = forge_txt2img_size_controls(script, sys.modules["gradio"])
+    note, ours = output_size_note(script, is_img2img=False)
+    watched = list(forge.values()) + [ours["Upscale Resolution (Shortest Edge)"], ours["Output Size Mode"],
+                                      ours["Scale Factor"], ours["Output Long Edge (px)"]]
+    for component in watched:
+        event = next(event for event in component.events if event["outputs"] == [note])
+        assert event["inputs"] == watched
+    handler = next(event for event in forge["txt2img_width"].events if event["outputs"] == [note])["fn"]
+    # 512x384 with Hires. fix x2 -> 1024x768, then the scale factor x2
+    assert handler(512, 384, True, 2.0, 0, 0, 1080, "Scale factor", 2.0, 2048) == \
+        "Output size: **2048×1536** from 1024×768"
+
+
+def test_txt2img_preview_without_forge_s_controls_stays_generic(script):
+    note, ours = output_size_note(script, is_img2img=False)
+    assert note.value == "Output size: depends on each input image"
+    assert not any(event["outputs"] == [note] for event in ours["Scale Factor"].events)
+
+
+def test_img2img_preview_reads_the_image_size_in_the_browser(script):
+    note, ours = output_size_note(script, is_img2img=True)
+    event = next(event for event in ours["Scale Factor"].events if event["outputs"] == [note])
+    assert event["_js"] == "seedvr2Img2imgPreview"
+    assert event["inputs"][2:] == [ours["Upscale Resolution (Shortest Edge)"], ours["Output Size Mode"],
+                                   ours["Scale Factor"], ours["Output Long Edge (px)"]]
+    assert event["fn"](512, 384, 1080, "Scale factor", 1.5, 2048) == "Output size: **768×576** from 512×384"
+    assert event["fn"](0, 0, 1080, "Scale factor", 1.5, 2048) == "Output size: depends on each input image"
+
+
+def test_img2img_refresh_button_id_matches_the_script_s_javascript(script_module):
+    with open(os.path.join(REPO_ROOT, "javascript", "seedvr2.js"), encoding="utf-8") as js:
+        source = js.read()
+    assert f'"{script_module.IMG2IMG_SIZE_REFRESH_ID}"' in source
+    assert "function seedvr2Img2imgPreview" in source
