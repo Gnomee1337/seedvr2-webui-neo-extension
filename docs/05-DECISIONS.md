@@ -91,6 +91,37 @@ diffusion and txt2img chain "generate → upscale" in one click.
 Why (*reconstructed from code*): the base image must be produced by Forge with all other extensions applied; the script is
 removed from `p.scripts.scripts` for that call and restored in `finally`.
 
+### Every generated or input image is upscaled; no grid of the results
+Why: the owner's choice. A grid of upscaled images is a huge extra file that costs memory and time, and the gallery
+already shows each image. In img2img each distinct input object is upscaled once: the Batch tab repeats one file
+`batch_size` times, and the same input with the same seed gives the same result.
+
+### Same-sized images go through the pipeline in passes of up to 16 MP of output, as frames of one tensor
+Why: the models load once per pass, while the DiT is still dropped before the VAE decode (what lets 8 GB GPUs run).
+Upscaling image by image would reload the models from disk for each image in "Unload" mode, or keep the DiT on the GPU
+during decoding if cached. With batch 1 and no overlap the frames do not affect each other. The cap keeps RAM bounded
+for huge batches (a typical batch of 8 at 1080p is one pass); other sizes get their own pass.
+
+### A result has exactly one image and one infotext per input; failures come back as the input
+Why: Forge pairs `processed.images` and `processed.infotexts` by index (gallery, saving, "Send to"); a missing image
+shifts every later infotext. A not-upscaled image carries `SeedVR2 Error` in its infotext, is not saved, and the result
+gets a comment so the failure is visible. The infotext holds only the exception type: the message can contain local
+paths or GPU details, and the infotext leaves the machine with the image.
+
+### The infotext is Forge's base infotext plus SeedVR2 keys, not rebuilt with `create_infotext`
+Why: `create_infotext` reads the SD model, which "Unload SD Checkpoint" has already unloaded (live: it raised and the
+prompt was lost). txt2img extends the infotexts Forge built for the base images; img2img writes the prompt in Forge's layout.
+
+### Saving follows "Always save all generated images" and the API's `save_images`; with them off nothing is written
+Why: the user's setting must hold for the upscaled images too. Read from the options (and the request's
+`override_settings`), not `p.save_samples()`, whose skipped flag from the last txt2img batch would stop saving.
+"Save Extra Copy of Original" only adds the img2img input: txt2img base images are saved by Forge by the same rule
+(the owner left this narrower rule to Claude; earlier it also saved txt2img originals with "Always save" off).
+
+### API values of the numeric settings are clamped to the slider ranges
+Why: the UI cannot send more than the sliders allow, an API call could (an unbounded resolution means unbounded
+memory). One set of bounds (`seedvr2_neo/upscale_settings.py`) builds the sliders and checks the values.
+
 ### Interruption checks only `shared.state.interrupted`
 Why (*reconstructed from code*): the original author removed the `stopping_generation` check deliberately. Likely reason:
 "Stop generating" in Forge means "finish the current image", which should not abort the upscale.

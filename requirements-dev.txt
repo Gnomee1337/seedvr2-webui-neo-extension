@@ -1,3 +1,4 @@
 # Packages for running the tests outside Forge (`python -m pytest`). Forge itself never reads this file.
 pytest
 gguf
+pillow

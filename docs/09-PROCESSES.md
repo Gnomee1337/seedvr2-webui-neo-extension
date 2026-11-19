@@ -48,46 +48,79 @@ The source of truth is the code.
    before any generation or SD unload.
 1. Remove this script from `p.scripts.scripts`, call `processing.process_images(p)` (normal generation with all
    other extensions, images saved as usual), put the script back.
-2. If interrupted — return the base result. Take `processed_base.images[0]` (with batch > 1 and grids enabled this is the grid).
-3. "Save Extra Copy of Original" → save that image again with `-original`.
+2. If interrupted — return the base result as is. The inputs are the generated images: `processed_base.images` from
+   `index_of_first_image` (skips the grid), as many as `p.all_seeds` (`select_generated_images` in
+   `seedvr2_neo/run_inputs.py`). No upscaled grid is made.
+3. No generated image → console line and an empty result `SeedVR2: there is no image to upscale`.
 4. Continue with the common upscale (process 5).
 
 **Why:** `05-DECISIONS.md` → "Forge integration".
 
 ## 4. img2img + SeedVR2  🟡
-**Trigger:** Generate in img2img with the script selected. `Script.run()`.
+**Trigger:** Generate in img2img with the script selected (also once per file of the Batch tab). `Script.run()`.
 
 0. The same model check and pipeline import as in process 3, step 0.
-1. The img2img diffusion pass is skipped; `p.init_images[0]` is the input (mask, denoise and resize settings are ignored).
-2. Continue with the common upscale (process 5).
+1. The img2img diffusion pass is skipped; every distinct object of `p.init_images` is an input (the Batch tab passes one
+   file as `[image] * batch_size`; mask, denoise and resize settings are ignored). None → the empty result of process 3, step 3.
+2. Each input gets the SeedVR2 seed and the UI prompt for its file name and infotext; `p` is not changed (the Batch
+   tab reuses it between files).
+3. Continue with the common upscale (process 5).
 
 ## 5. SeedVR2 upscale (common part)  🟡
-1. "Unload SD Checkpoint" → `modules.sd_models.unload_model_weights()` + `devices.torch_gc()`.
-2. Seed: the UI value, or for `-1` — the generation's first seed, else `p.seed`, else random.
-3. Image → tensor `[1, H, W, C]` float16.
-4. Cached models (`GlobalModelCache`, ids `forge_dit` / `forge_vae`) are dropped before the run when "Force Reload" is on
+0. Before any generation (process 3, step 1): the numeric settings are read and clamped to the slider ranges
+   (`parse_upscale_settings` in `seedvr2_neo/upscale_settings.py`; resolution 512–3840, noise 0–1, tile 512–2048,
+   overlap 64–512); an unreadable API value takes the slider's default.
+1. Seed: the UI value, or for `-1` — the first generated image's seed (txt2img), else `p.seed`, else random. One seed
+   for all images of the run. A typed seed outside 0 … 2³²−1 (the pipeline also seeds numpy) or not a number counts as
+   `-1`, with a console line.
+2. Each input → RGB, or RGBA when it has transparency (`to_pipeline_image`: grayscale, palette, CMYK; 16-bit
+   grayscale scaled through numpy). This converted image is also what comes back if the upscale fails.
+3. Saving plan (`plan_saving` in `seedvr2_neo/run_results.py`): results are saved when "Always save all generated
+   images" is on (the request's `override_settings` first, `read_option`) and the caller did not set
+   `do_not_save_samples` (the API's `save_images`). Not `p.save_samples()`: Forge's skipped flag from the last txt2img
+   batch would stop saving. With saving off nothing is written. "Save Extra Copy of Original" saves the img2img inputs
+   with `-original` before the upscale; txt2img base images are saved by Forge.
+4. "Unload SD Checkpoint" → `modules.sd_models.unload_model_weights()` + `devices.torch_gc()`.
+5. Passes (`group_by_shape` + `split_into_passes`): the inputs are grouped by size and mode, and each group is cut into
+   passes of at most 16 MP of upscaled output (`PASS_BUDGET_PIXELS`); a larger single frame gets its own pass. Each
+   pass → one tensor `[N, H, W, C]` float16 (built per image).
+6. Cached models (`GlobalModelCache`, ids `forge_dit` / `forge_vae`) are dropped before the run when "Force Reload" is on
    or when the selected files are not the ones they were loaded from (absolute path, size, modification time, read at
-   this step — `seedvr2_neo/loaded_models.py`).
-5. Memory plan from the UI (`seedvr2_neo/memory_plan.py`): "Keep in RAM" → models cached; BlockSwap blocks > 0 or I/O
+   this step, once per run — `seedvr2_neo/loaded_models.py`).
+7. Memory plan from the UI (`seedvr2_neo/memory_plan.py`): "Keep in RAM" → models cached; BlockSwap blocks > 0 or I/O
    layers on → DiT and VAE offload device = CPU (BlockSwap requires it; the VAE waits in RAM during the DiT step).
-6. A new generation context every run on Forge's device (`modules.devices.device`), tensors offloaded to CPU.
+8. Per pass: a new generation context on Forge's device (`modules.devices.device`), tensors offloaded to CPU.
    `prepare_runner`: DiT/VAE taken from the cache if the file name matches, otherwise loaded from the folder of
    process 2; config `configs_7b` for 36 transformer blocks in the checkpoint header, `configs_3b` for 32 (header
    unreadable → `7b` in the file name, any case). Tiling and BlockSwap from the UI.
    Fixed: `sdpa` attention, no `torch.compile`.
    Compute dtype is bf16 whenever the bf16 probe passes, including GPUs that only emulate it.
-7. Phases 1–4: encode (VAE) → upscale (DiT, one step; text embeddings loaded here) → decode (VAE) → post-process (LAB
-   color correction). Interruption is checked between phases. After each of the first three phases dropped objects
-   are collected and the allocator's cached VRAM is returned (`gc.collect()` + `devices.torch_gc()`). A model that is
-   not cached is dropped straight from the GPU, without a copy to RAM (local patch, `external-apis/seedvr2-upstream.md`).
-8. Output tensor → PIL; `SeedVR2 Model` and `SeedVR2 Resolution` added to the generation parameters;
-   saved to `p.outpath_samples` with `-seedvr2`; returned as the only image of the result.
-9. End of run (`seedvr2_neo/model_lifecycle.py`): "Keep in RAM" after the four phases succeeded → models stay cached
-   in system RAM (the pipeline moves them off the GPU after their phase), even if saving the image then fails;
-   otherwise — "Unload", an error or an interrupt inside the pipeline — both models are removed from the cache.
-   Either way `gc.collect()` + `devices.torch_gc()`; the console says which.
+9. Phases 1–4 over all frames of the pass, each frame on its own (batch 1, no overlap): encode (VAE) → upscale (DiT,
+   one step; text embeddings loaded here) → decode (VAE) → post-process (LAB color correction). Interruption is checked
+   between phases and between passes. After each of the first three phases dropped objects are collected and the
+   allocator's cached VRAM is returned (`gc.collect()` + `devices.torch_gc()`). A model that is not cached is dropped
+   straight from the GPU, without a copy to RAM (local patch, `external-apis/seedvr2-upstream.md`); with "Unload" the
+   next pass loads it again.
+10. Output tensor → PIL images one frame at a time (N per pass, checked).
+11. End of run (`seedvr2_neo/model_lifecycle.py`): "Keep in RAM" after all passes succeeded → models stay cached
+   in system RAM (the pipeline moves them off the GPU after their phase); otherwise — "Unload", an error or an
+   interrupt — both models are removed from the cache. Either way `gc.collect()` + `devices.torch_gc()`; the console says which.
+12. Result (`build_result` in the script): one image and one infotext per input, in input order. The infotext is the
+   base one (`BaseInfotext` in `seedvr2_neo/run_results.py`: Forge's infotext of the generated image in txt2img; the
+   prompt and `Negative prompt:` line in img2img) with `SeedVR2 Model`, `SeedVR2 VAE`, `SeedVR2 Resolution`,
+   `SeedVR2 Seed` added to its parameters line. Forge's `create_infotext` is not used: it reads the SD model, which is
+   unloaded (or never loaded) by then. The infotext is also put into each returned image's `info["parameters"]`
+   (with `enable_pnginfo`), so unsaved gallery and API images carry it. An upscaled image is saved to
+   `p.outpath_samples` with `-seedvr2` by the saving plan (`samples_format` and `save_to_dirs` from the request's
+   `override_settings` first). An image not upscaled (interrupt or error) comes back as its converted input with
+   `SeedVR2 Error: Interrupted` / `Runtime Error: <exception type>` added, is not saved, and the result gets a comment
+   (`p.comment`, shown under the parameters) saying how many images came back without upscaling.
 
-**Writes:** one image file per run (plus `-original` if chosen). The SD checkpoint (if unloaded) reloads on the next generation.
-**On failure:** interruption → the input image is returned; any other exception → traceback in the console,
-empty result with `Runtime Error: …`. A failure inside the pipeline unloads the models; nothing of the run is reused.
+**Writes:** one `-seedvr2` file per upscaled image when saving is on, plus `-original` files for img2img inputs if
+chosen. A failed write (any exception, including other extensions' save callbacks) is printed and skipped. The SD
+checkpoint (if unloaded) reloads on the next generation.
+**On failure:** interruption or any exception inside the upscale → the console says why (full message and traceback
+for errors; the infotext gets only the exception type, since it leaves the machine with the image); the images of
+finished passes are returned upscaled (and saved), the rest as their inputs with `SeedVR2 Error`. The models are
+unloaded; nothing of the run is reused.
 **Why:** `05-DECISIONS.md` → "VRAM and caching".
