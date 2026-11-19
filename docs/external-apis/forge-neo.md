@@ -291,7 +291,7 @@ Source for every line: local `neo` checkout (read in full at the cited file), fi
   id from `is_img2img`, `self.show(True) == self.show(False)` (tab prefix `txt2img_`/`img2img_` only when equal) and a sanitised
   `self.title()` (lines 343-349; the final `return` line was not read), so it calls `show` and `title`; a stub must do the same only if a test checks the id. `ScriptRunner.__init__` sets `self.scripts = []` (line 559).
 - **`ToolButton`** (`modules/ui_components.py:17-26`): `ToolButton(value="", *args, elem_classes=None, **kwargs)`, passes
-  `elem_classes=["tool", *elem_classes]` and `value=value` to `gr.Button`. **`FormRow(gr.Row, FormComponent)`** has no `__init__` (lines 43-47).
+  `elem_classes=["tool", *elem_classes]` and `value=value` to `gr.Button`. **`FormRow(gr.Row, FormComponent)`** has no `__init__` (lines 43-47); the script does not use it.
 - **`tooltip=` keyword on Gradio components:** Gradio 4.40's own constructors do not take it; Neo patches every component class
   (`repair` in `modules/gradio_extensions.py:129-153`: `__repaired_init__(self, *args, tooltip=None, source=None, ...)` stores it as
   `self.webui_tooltip`, and unknown kwargs are dropped with a `GradioDeprecationWarning`). So `ToolButton(..., tooltip="...")`

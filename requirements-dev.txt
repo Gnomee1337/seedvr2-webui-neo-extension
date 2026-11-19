@@ -1,6 +1,6 @@
 # Packages for running the tests outside Forge (`python -m pytest`). Forge itself never reads this file.
-# The tests of the Forge script need torch and torchvision; any build works, the CPU one is enough. On Linux, pip
-# takes the large CUDA build by default: install the CPU one first (as CI does):
+# The tests of the Forge script and of `seedvr2_neo/upscale_run.py` need torch and torchvision; any build works, the
+# CPU one is enough. On Linux, pip takes the large CUDA build by default: install the CPU one first (as CI does):
 #   pip install torch torchvision --index-url https://download.pytorch.org/whl/cpu
 pytest
 gguf

@@ -4,14 +4,18 @@ These tests describe what users see: which images come back, with which infotext
 SD checkpoint and the SeedVR2 models, and how errors and interrupts end a run.
 """
 
+import ast
 import inspect
+import os
 import sys
 
 import pytest
 from PIL import Image
 
-from conftest import DIT, VAE, make_img2img, run_args
-from forge_stubs import UPSCALE_FACTOR, base_image_color
+from forge_stubs import DIT, FORGE_DEVICE, PIPELINE_FUNCTIONS, UPSCALE_FACTOR, VAE, base_image_color, make_img2img, \
+    run_args
+
+REPO_ROOT = os.path.join(os.path.dirname(__file__), "..", "..")
 
 UPSCALED_SIZE = (8 * UPSCALE_FACTOR, 8 * UPSCALE_FACTOR)
 CACHE_IDS = ["forge_dit", "forge_vae"]
@@ -26,7 +30,7 @@ def corner_color(image):
 
 
 def colors_match(actual, expected, tolerance=2):
-    """The pipeline works in float16 and the script truncates to 8 bits, so a channel may drift by a level or two."""
+    """The pipeline works in float16 and the run truncates to 8 bits, so a channel may drift by a level or two."""
     return len(actual) == len(expected) and all(
         abs(a - e) <= tolerance for actual_color, expected_color in zip(actual, expected)
         for a, e in zip(actual_color, expected_color))
@@ -39,6 +43,24 @@ def test_ui_returns_one_component_per_run_argument(script):
     run_parameters = list(inspect.signature(script.run).parameters)[1:]  # without `p`
     assert len(components) == len(run_parameters)
     assert list(run_args()) == run_parameters
+
+
+# What each `Script.run` parameter is, by the label of the component `ui()` returns for it.
+RUN_PARAMETER_LABELS = {
+    "dit_model_name": "DiT Model", "vae_model_name": "VAE Model", "seed": "Seed (-1 = Random/Follow)",
+    "resolution": "Upscale Resolution (Shortest Edge)", "input_noise": "Input Noise Scale",
+    "latent_noise": "Latent Noise Scale", "force_reload": "Force Reload", "unload_sd": "Unload SD Checkpoint",
+    "save_original": "Save Extra Copy of Original", "use_tile_vae": "Enable VAE Tiling", "tile_size": "Tile Size",
+    "tile_overlap": "Tile Overlap", "debug_mode": "Show Debug Logs", "after_run": "After run",
+    "blocks_to_swap": "BlockSwap: DiT blocks kept in RAM", "swap_io_components": "BlockSwap: I/O layers too",
+}
+
+
+def test_ui_components_come_in_the_order_of_the_run_parameters(script):
+    """Forge passes the UI values to `run()` by position; a reordered control would feed the wrong parameter."""
+    labels = [component.kwargs["label"] for component in script.ui(is_img2img=False)]
+    run_parameters = list(inspect.signature(script.run).parameters)[1:]
+    assert labels == [RUN_PARAMETER_LABELS[name] for name in run_parameters]
 
 
 def test_ui_offers_the_models_in_the_folder(script):
@@ -143,10 +165,11 @@ def test_nothing_is_saved_when_saving_is_off(script, make_txt2img, forge, setup)
     assert processed.images[0].size == UPSCALED_SIZE
 
 
-def test_a_failing_save_keeps_the_result(script, make_txt2img, forge):
-    forge.save_error = OSError("disk full")
+def test_a_failing_save_keeps_the_result_and_the_other_files(script, make_txt2img, forge):
+    forge.save_error, forge.failing_saves = OSError("disk full"), 1
     processed = run(script, make_txt2img(batch_size=2))
     assert [image.size for image in processed.images] == [UPSCALED_SIZE] * 2
+    assert [saved.seed for saved in forge.saved] == [1001]  # the second image is saved after the first one failed
 
 
 def test_infotext_is_not_embedded_when_png_info_is_off(script, make_txt2img, forge):
@@ -192,6 +215,7 @@ def test_img2img_saves_the_original_when_asked(script, forge):
     run(script, make_img2img([Image.new("RGB", (8, 8))]), save_original=True)
     assert [saved.suffix for saved in forge.saved] == ["-original", "-seedvr2"]
     assert forge.saved[0].image.size == (8, 8)
+    assert forge.saved[0].info == "a dog"  # the input's own infotext: the prompt, no SeedVR2 parameters
 
 
 def test_img2img_saves_no_original_when_saving_is_off(script, forge):
@@ -252,6 +276,13 @@ def test_error_in_a_later_pass_keeps_the_images_already_upscaled(script, pipelin
     assert "1 of 2 images returned without upscaling" in processed.comments
 
 
+def test_interrupt_in_a_later_pass_keeps_the_images_already_upscaled(script, pipeline):
+    pipeline.interrupt_in, pipeline.only_in_pass = "encode", 1
+    processed = run(script, make_img2img([Image.new("RGB", (8, 8)), Image.new("RGB", (16, 8))]))
+    assert [image.size for image in processed.images] == [UPSCALED_SIZE, (16, 8)]
+    assert "SeedVR2 Error: Interrupted" in processed.infotexts[1] and "SeedVR2 Error" not in processed.infotexts[0]
+
+
 def test_interrupt_during_a_phase_returns_the_inputs_marked_interrupted(script, make_txt2img, forge, pipeline):
     pipeline.interrupt_in = "decode"
     processed = run(script, make_txt2img())
@@ -282,8 +313,24 @@ def test_sd_checkpoint_is_unloaded_only_when_asked(script, make_txt2img, forge):
 
 def test_models_are_unloaded_after_a_run_by_default(script, make_txt2img, pipeline):
     run(script, make_txt2img())
-    assert pipeline.cache.cached == set()
-    assert pipeline.runner_kwargs[0]["dit_cache"] is False
+    assert pipeline.runner_kwargs[0]["dit_cache"] is False and pipeline.runner_kwargs[0]["vae_cache"] is False
+    assert pipeline.cache.removed[-2:] == CACHE_IDS  # dropped after the run
+
+
+def test_the_run_uses_forge_device_and_releases_memory(script, make_txt2img, forge, pipeline):
+    run(script, make_txt2img(), unload_sd=False)
+    context = pipeline.context_kwargs[0]
+    assert context["dit_device"] == FORGE_DEVICE and context["vae_device"] == FORGE_DEVICE
+    releases_without_sd_unload = forge.torch_gc_calls
+    assert releases_without_sd_unload >= 3  # after encode, upscale and decode
+    run(script, make_txt2img(), unload_sd=True)
+    assert forge.torch_gc_calls - releases_without_sd_unload == releases_without_sd_unload + 1  # + after the SD unload
+
+
+@pytest.mark.parametrize("debug_mode", [False, True])
+def test_show_debug_logs_reaches_the_pipeline_logger(script, make_txt2img, pipeline, debug_mode):
+    run(script, make_txt2img(), debug_mode=debug_mode)
+    assert pipeline.context_kwargs[0]["debug"].enabled is debug_mode
 
 
 def test_keep_in_ram_reuses_the_models_on_the_next_run(script, make_txt2img, pipeline):
@@ -328,3 +375,29 @@ def test_run_accepts_the_arguments_of_an_older_ui(script, make_txt2img):
     args = list(run_args().values())[:13]
     processed = script.run(make_txt2img(), *args)
     assert processed.images[0].size == UPSCALED_SIZE
+
+
+# --- the calls into the vendored pipeline ----------------------------------------------------------------------------
+
+def real_parameters(module_name, function_name):
+    """Positional parameter names, keyword names and whether `**kwargs` is accepted, read from the vendored source
+    (not imported: it needs the pipeline's packages)."""
+    path = os.path.join(REPO_ROOT, *module_name.split(".")) + ".py"
+    with open(path, encoding="utf-8") as source:
+        tree = ast.parse(source.read())
+    function = next(node for node in tree.body if isinstance(node, ast.FunctionDef) and node.name == function_name)
+    positional = [arg.arg for arg in function.args.posonlyargs + function.args.args]
+    keywords = positional + [arg.arg for arg in function.args.kwonlyargs]
+    return positional, keywords, function.args.kwarg is not None
+
+
+def test_every_pipeline_call_fits_the_real_vendored_signature(script, make_txt2img, pipeline):
+    """The fake pipeline accepts anything; a keyword renamed upstream must still fail a test, not every user's run."""
+    run(script, make_txt2img(batch_size=2))
+    called = {(call.module, call.function) for call in pipeline.calls}
+    assert called == {(module, name) for module, names in PIPELINE_FUNCTIONS.items() for name in names}
+    for call in pipeline.calls:
+        positional, keywords, takes_any_keyword = real_parameters(call.module, call.function)
+        assert call.positional_count <= len(positional), call
+        assert takes_any_keyword or set(call.keywords) <= set(keywords), (call, set(call.keywords) - set(keywords))
+        assert not set(call.keywords) & set(positional[:call.positional_count]), call

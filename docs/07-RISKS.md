@@ -55,7 +55,7 @@ Every risk and every bug found gets a rating **R = S × L** and an icon based on
 
 ## 2. Dependencies
 - 🟢 R2 (S1×L2) **`gguf` comes from Forge Neo, not from `install.py`.** `import gguf` resolves to Neo's bundled copy
-  (`external-apis/forge-neo.md`); if Neo drops or moves it, `.gguf` models stop loading. Close: a test that imports it. (B09)
+  (`external-apis/forge-neo.md`); if Neo drops or moves it, `.gguf` models stop loading. Close: a test that imports it inside a Neo install (no block yet).
 
 ## 3. VRAM and model lifecycle
 Live-checked on an 8 GB GPU without bf16, 16 GB RAM, 1080px output, VAE tile 512: 3B GGUF Q6_K — DiT step 7 s;
@@ -146,13 +146,27 @@ Live-checked on an 8 GB GPU without bf16, 16 GB RAM, 1080px output, VAE tile 512
   Close: set `ctx['interrupt_fn']` to a Forge check and update `shared.state.job*` from `progress_callback`. (B08)
 
 ## 5. Code hygiene
+- 🟢 R3 (S3×L1) **"Reload UI" after a manual `git pull` can drop the script until a restart.** Reload keeps the old
+  `seedvr2_neo.*` modules in `sys.modules`, so the new script's import of a name added to an existing module raises
+  ImportError. Forge's update path ("Apply and restart UI") restarts the process (`external-apis/forge-neo.md`).
+- 🟢 R2 (S1×L2) **CI packages are unpinned** (`requirements-dev.txt`, CPU torch): a new torch/numpy/gguf release can turn
+  CI red with no change here. A pull request from a branch of this repository runs twice (push + pull_request).
+- 🟢 R2 (S1×L2) **Over the size guideline:** `UpscaleRun._upscale_tensor` (~70 lines, mostly the pipeline's keyword
+  arguments, moved as is), `Script.run` (~47 lines), `tests/scripts/forge_stubs.py` (~430 lines of stand-ins).
+- 🟢 R1 (S1×L1) **The script-test stand-ins still import the real `seedvr2_vendor`, `.core`, `.utils` packages** (only
+  the leaf modules are replaced); their `__init__.py` files are empty today. If an upstream sync adds imports there,
+  the script tests start importing the real pipeline.
 - 🟢 R2 (S1×L2) **Upscaled pixels are truncated, not rounded, to 8 bits** (`tensor_to_images` in
   `seedvr2_neo/upscale_run.py`: `* 255` then `astype(uint8)`): channels come out up to one level darker (a flat 10
   comes back as 9). Not visible by eye; fix together with a pipeline-output change, not in a refactor.
 - 🟢 R3 (S1×L3) **The script's tests run against stand-ins of Forge, Gradio and the pipeline** (`tests/scripts/forge_stubs.py`).
   A Forge Neo change of a name or signature the script uses, or an upstream change of `GlobalModelCache` /
   `prepare_runner` / `validate_blockswap_config`, leaves all tests green. Mitigation: the stand-ins follow
-  `external-apis/forge-neo.md`; a live run after a Forge or upstream update.
+  `external-apis/forge-neo.md`; the keywords passed to the vendored pipeline are checked against its source
+  (`test_every_pipeline_call_fits_the_real_vendored_signature`); a live run after a Forge or upstream update.
+- 🟢 R3 (S3×L1) **CI never imports the real vendored pipeline** (it is faked, and its packages — omegaconf, einops,
+  diffusers, `rotary-embedding-torch` — are not installed there): a vendored file left out of a commit passes CI. Only
+  `scripts/` and `seedvr2_neo/` are covered by the clean checkout. Mitigation: a live run before merging into `main`.
 - 🟢 R3 (S1×L3) **Leftover `src/` folder after an update.** Forge's update (`reset --hard`) removes the tracked files but
   keeps untracked `src/**/__pycache__`. Harmless: nothing imports `src`, and a folder without `__init__.py` loses to
   another extension's real `src` package. Users may delete it by hand.

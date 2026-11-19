@@ -37,7 +37,7 @@ so the tests survive moving code. Tests drive `Script.run()` and check what user
 ### CI runs only pytest; no linter, no required checks on GitHub
 Why: one developer, tests already run before every commit; CI's value is a clean checkout (a file left out of a commit,
 a package missing from `requirements-dev.txt`) and outside pull requests. The owner chose this minimal form.
-Python 3.10 (the lowest supported) with CPU torch from the PyTorch index; torch is in `requirements-dev.txt` because the
+Python 3.10 (the lowest supported) and 3.13 (current Forge Neo installs) with CPU torch from the PyTorch index; torch is in `requirements-dev.txt` because the
 script imports it.
 
 ### torch is imported in `seedvr2_neo/` only by `upscale_run.py`

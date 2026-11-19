@@ -9,14 +9,11 @@ import sys
 
 import pytest
 
-from forge_stubs import FakePipeline, Forge, ScriptRunner, StableDiffusionProcessingImg2Img, \
-    StableDiffusionProcessingTxt2Img, forge_modules, pipeline_modules
+from forge_stubs import DIT, VAE, FakePipeline, Forge, ScriptRunner, StableDiffusionProcessingTxt2Img, forge_modules, \
+    pipeline_modules
 
 SCRIPT_PATH = os.path.join(os.path.dirname(__file__), "..", "..", "scripts", "seedvr2_script.py")
 SCRIPT_MODULE_NAME = "seedvr2_script"
-
-DIT = "seedvr2_ema_3b-Q4_K_M.gguf"
-VAE = "ema_vae_fp16.safetensors"
 
 
 @pytest.fixture
@@ -72,18 +69,3 @@ def make_txt2img(script):
         return p
 
     return make
-
-
-def make_img2img(init_images, **fields):
-    return StableDiffusionProcessingImg2Img(prompt="a dog", negative_prompt="", seed=-1, init_images=init_images,
-                                            **fields)
-
-
-def run_args(**overrides):
-    """`Script.run` arguments after `p`, in the order `Script.ui` returns its components."""
-    args = dict(dit_model_name=DIT, vae_model_name=VAE, seed=-1, resolution=1080, input_noise=0.0, latent_noise=0.0,
-                force_reload=False, unload_sd=True, save_original=False, use_tile_vae=True, tile_size=1024,
-                tile_overlap=128, debug_mode=False, after_run="Unload SeedVR2", blocks_to_swap=0,
-                swap_io_components=False)
-    args.update(overrides)
-    return args

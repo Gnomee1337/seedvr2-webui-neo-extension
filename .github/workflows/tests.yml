@@ -1,5 +1,6 @@
-# Runs the tests on a clean checkout: catches a file left out of a commit or a package missing from
-# requirements-dev.txt before users get the change through "Check for updates". No GPU: the pipeline is faked.
+# Runs the tests on a clean checkout: catches a file of our code (scripts/, seedvr2_neo/) left out of a commit or a
+# package missing from requirements-dev.txt before users get the change through "Check for updates". No GPU: the
+# vendored pipeline is replaced by a fake, so a missing vendored file or pipeline package is not caught here.
 name: tests
 
 on:
@@ -17,11 +18,16 @@ jobs:
   pytest:
     runs-on: ubuntu-latest
     timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        # The lowest supported Python and the one current Forge Neo installs use
+        python-version: ["3.10", "3.13"]
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-python@v7
         with:
-          python-version: "3.10"
+          python-version: ${{ matrix.python-version }}
       - name: Install dependencies
         # The CPU build of torch first: from PyPI, pip would take the CUDA build of several GB.
         run: |

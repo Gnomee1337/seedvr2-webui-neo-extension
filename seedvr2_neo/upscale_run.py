@@ -25,7 +25,8 @@ from seedvr2_neo.upscale_settings import UpscaleSettings
 # Why images come back without upscaling when the user pressed Interrupt (infotext and result comment).
 INTERRUPTED_MESSAGE = "Interrupted"
 
-# Fixed pipeline settings (see the decision on batch 1, LAB color correction and `sdpa`).
+# Fixed pipeline settings: the simplest configuration that works without optional packages (`sdpa` is PyTorch's own
+# attention; LAB color correction keeps the input's colors).
 COLOR_CORRECTION = "lab"
 ATTENTION_MODE = "sdpa"
 
@@ -62,7 +63,7 @@ class UpscaleRequest:
 class HostHooks:
     """What the run takes from the host WebUI."""
 
-    device: Any  # torch.device the DiT and VAE run on
+    device: torch.device  # the DiT and VAE run on it
     release_memory: Callable[[], None]  # collect dropped objects and return the allocator's cached VRAM
     is_interrupted: Callable[[], bool]  # the user pressed Interrupt
 
@@ -104,8 +105,8 @@ class UpscaleRun:
         self._hooks = hooks
 
     def check_interruption(self, *args, **kwargs) -> None:
-        """Passed to the pipeline as its progress callback. Only the interrupt flag is checked; Forge's "stopping"
-        flag is ignored on purpose."""
+        """Passed to the pipeline as its progress callback. Only Interrupt stops the run: Forge's "Stop generating"
+        (`stopping_generation`) means "finish the current image", which should not abort the upscale."""
         if self._hooks.is_interrupted():
             raise UpscaleInterrupted("User interrupted generation.")
 
@@ -154,7 +155,8 @@ class UpscaleRun:
             raise RuntimeError(f"the pipeline returned {len(outputs)} images for {len(pass_images)} inputs")
         return outputs
 
-    def _upscale_tensor(self, img_tensor: torch.Tensor, request: UpscaleRequest, debug, debug_mode: bool):
+    def _upscale_tensor(self, img_tensor: torch.Tensor, request: UpscaleRequest, debug,
+                        debug_mode: bool) -> torch.Tensor:
         """Run the four SeedVR2 phases on a [N, H, W, C] tensor of N same-sized images and return the pipeline's output.
 
         With batch size 1 and no temporal overlap the pipeline treats every frame on its own, so the images do not

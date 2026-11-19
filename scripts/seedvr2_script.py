@@ -2,7 +2,7 @@ import gc
 import os
 import sys
 from dataclasses import dataclass
-from typing import Dict, List, Optional, Union
+from typing import Any, Dict, List, Mapping, Optional, Union
 
 import gradio as gr
 from modules import scripts, processing, images, shared, devices
@@ -69,9 +69,10 @@ def release_freed_memory() -> None:
 # Module-level: Forge creates one Script per tab, while the vendored model cache is shared by the whole process.
 MODEL_LIFECYCLE = ModelLifecycle(LoadedModelTracker(), release_freed_memory)
 
+
 def forge_hooks() -> HostHooks:
-    """What the pipeline run takes from Forge, read at each run. Only `.interrupted` is checked; the `.stopping`
-    check was removed on purpose."""
+    """What the pipeline run takes from Forge, read at each run. Only Interrupt (`.interrupted`) stops a run; "Stop
+    generating" (`.stopping_generation`) means "finish the current image", which should not abort the upscale."""
     return HostHooks(device=devices.device, release_memory=release_freed_memory,
                      is_interrupted=lambda: shared.state.interrupted)
 
@@ -125,8 +126,8 @@ def save_originals(p, inputs: List[Image.Image], details: List[InputDetails]) ->
         save_result_image(p, image, index, input_details, input_details.infotext.with_params({}), ORIGINAL_SUFFIX)
 
 
-def build_result(p, run_images: List[RunImage], details: List[InputDetails], params, failure: Optional[str],
-                 result_seed: int, save_plan: SavePlan) -> Processed:
+def build_result(p, run_images: List[RunImage], details: List[InputDetails], params: Mapping[str, Any],
+                 failure: Optional[str], result_seed: int, save_plan: SavePlan) -> Processed:
     """Forge's result: one image and one infotext per input. Upscaled images are saved by the user's settings; when
     some are not upscaled, the result gets a comment saying so."""
     results = finish_images(run_images, details, params, failure, shared.opts.enable_pnginfo)
@@ -269,7 +270,7 @@ class Script(scripts.Script):
         if is_txt2img:
             if debug_mode: print("[SeedVR2] Generating base images (txt2img)...")
             processed_base = self._generate_base_images(p)
-            # Only .interrupted is checked (see forge_hooks)
+            # Only Interrupt stops SeedVR2 (see forge_hooks)
             if shared.state.interrupted:
                 print("[SeedVR2] Interrupted during Txt2Img generation. Stopping SeedVR2.")
                 return processed_base  # the base images as Forge made them

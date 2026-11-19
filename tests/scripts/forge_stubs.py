@@ -18,6 +18,16 @@ from PIL import Image
 REFRESH_SYMBOL = "\U0001f504"
 
 
+# Forge's device in the tests: not the default CPU, so a test can tell it reached the pipeline. Not "cuda", so the
+# script does not ask torch for the GPU's memory size.
+FORGE_DEVICE = torch.device("cpu", 3)
+
+
+# The model files of the test model folder.
+DIT = "seedvr2_ema_3b-Q4_K_M.gguf"
+VAE = "ema_vae_fp16.safetensors"
+
+
 # --- gradio ---------------------------------------------------------------------------------------------------------
 
 class Component:
@@ -103,6 +113,7 @@ class Forge:
         self.process_images_calls = 0
         self.scripts_during_generation: List[List[Any]] = []
         self.save_error: Optional[Exception] = None
+        self.failing_saves: Optional[int] = None  # how many saves fail with `save_error`; None = every one
         self.interrupt_generation = False  # the user presses Interrupt while Forge makes the base images
 
     def save_image(self, image, path, basename, seed=None, prompt=None, extension="png", info=None,
@@ -110,7 +121,9 @@ class Forge:
                    existing_info=None, forced_filename=None, suffix="", save_to_dirs=None):
         """`modules.images.save_image`: same signature and return value `(fullfn, txt_fullfn)`; records the call
         instead of writing a file, and sets `already_saved_as` on the image as Forge does."""
-        if self.save_error is not None:
+        if self.save_error is not None and (self.failing_saves is None or self.failing_saves > 0):
+            if self.failing_saves is not None:
+                self.failing_saves -= 1
             raise self.save_error
         fullfn = f"{path}/{len(self.saved):05d}-{seed}{suffix}.{extension}"
         self.saved.append(SavedImage(image, path, seed, prompt, extension, info, suffix, save_to_dirs))
@@ -151,7 +164,8 @@ class ScriptRunner:
 
 @dataclass
 class StableDiffusionProcessing:
-    """The `p` fields the script touches, with Forge's defaults (`modules/processing.py`)."""
+    """The `p` fields the script touches (`modules/processing.py`). Forge's defaults, except tiny images (8x8, fast
+    tests) and an output folder name (Forge's default is None; the script passes it on to `save_image` untouched)."""
 
     prompt: str = ""
     negative_prompt: str = ""
@@ -240,11 +254,7 @@ def make_ui_components(gradio: types.ModuleType) -> types.ModuleType:
         def __init__(self, value="", *args, elem_classes=None, **kwargs):
             super().__init__(*args, elem_classes=["tool", *(elem_classes or [])], value=value, **kwargs)
 
-    class FormRow(gradio.Row):
-        pass
-
     module.ToolButton = ToolButton
-    module.FormRow = FormRow
     return module
 
 
@@ -288,12 +298,14 @@ class FakePipeline:
         self.cache = FakeModelCache()
         self.passes: List[torch.Tensor] = []  # the input tensor of every pass
         self.runner_kwargs: List[Dict[str, Any]] = []
+        self.context_kwargs: List[Dict[str, Any]] = []
         self.generation_kwargs: List[Dict[str, Any]] = []
         self.fail_in: Optional[str] = None
         self.failure: Exception = RuntimeError("CUDA out of memory at C:/Users/someone/models")
         self.interrupt_in: Optional[str] = None
         self.only_in_pass: Optional[int] = None  # 0-based pass the failure or interrupt happens in; None = every pass
         self.phases_run: List[str] = []
+        self.calls: List["PipelineCall"] = []  # every call of a vendored function, filled by `pipeline_modules`
 
     def _phase(self, name, progress_callback):
         self.phases_run.append(name)
@@ -306,6 +318,7 @@ class FakePipeline:
             progress_callback(1, 1, 1, name)
 
     def setup_generation_context(self, **kwargs):
+        self.context_kwargs.append(kwargs)
         return {"setup": kwargs}
 
     def prepare_runner(self, **kwargs):
@@ -344,22 +357,49 @@ class Debug:
         self.enabled = enabled
 
 
+# The vendored functions the script calls, by the module they live in.
+PIPELINE_FUNCTIONS = {
+    "seedvr2_vendor.core.generation_utils": ("setup_generation_context", "prepare_runner", "compute_generation_info"),
+    "seedvr2_vendor.core.generation_phases": ("encode_all_batches", "upscale_all_batches", "decode_all_batches",
+                                              "postprocess_all_batches"),
+}
+
+
+@dataclass
+class PipelineCall:
+    """One call of a vendored function: how many positional arguments and which keywords."""
+
+    module: str
+    function: str
+    positional_count: int
+    keywords: List[str]
+
+
+def _recording(pipeline: FakePipeline, module: str, name: str) -> Callable:
+    """The fake function, recording the call shape: the fake accepts any keyword, so the shapes are checked against
+    the real signatures separately."""
+    fake = getattr(pipeline, name)
+
+    def call(*args, **kwargs):
+        pipeline.calls.append(PipelineCall(module, name, len(args), sorted(kwargs)))
+        return fake(*args, **kwargs)
+
+    return call
+
+
 def pipeline_modules(pipeline: FakePipeline) -> Dict[str, types.ModuleType]:
     """`sys.modules` entries for the vendored modules the script imports its pipeline from."""
     debug = types.ModuleType("seedvr2_vendor.utils.debug")
     debug.Debug = Debug
-    utils = types.ModuleType("seedvr2_vendor.core.generation_utils")
-    utils.setup_generation_context = pipeline.setup_generation_context
-    utils.prepare_runner = pipeline.prepare_runner
-    utils.compute_generation_info = pipeline.compute_generation_info
-    phases = types.ModuleType("seedvr2_vendor.core.generation_phases")
-    phases.encode_all_batches = pipeline.encode_all_batches
-    phases.upscale_all_batches = pipeline.upscale_all_batches
-    phases.decode_all_batches = pipeline.decode_all_batches
-    phases.postprocess_all_batches = pipeline.postprocess_all_batches
     cache = types.ModuleType("seedvr2_vendor.core.model_cache")
     cache.get_global_cache = lambda: pipeline.cache
-    return {module.__name__: module for module in (debug, utils, phases, cache)}
+    modules = {debug.__name__: debug, cache.__name__: cache}
+    for module_name, functions in PIPELINE_FUNCTIONS.items():
+        module = types.ModuleType(module_name)
+        for name in functions:
+            setattr(module, name, _recording(pipeline, module_name, name))
+        modules[module_name] = module
+    return modules
 
 
 # --- installing the stubs -------------------------------------------------------------------------------------------------
@@ -376,7 +416,7 @@ def forge_modules(forge: Forge) -> Dict[str, types.ModuleType]:
     shared.state = forge.state
 
     devices = types.ModuleType("modules.devices")
-    devices.device = torch.device("cpu")
+    devices.device = FORGE_DEVICE
     devices.torch_gc = forge.torch_gc
 
     sd_models = types.ModuleType("modules.sd_models")
@@ -406,3 +446,20 @@ def forge_modules(forge: Forge) -> Dict[str, types.ModuleType]:
     for name, module in submodules.items():
         setattr(modules, name, module)
     return {"gradio": gradio, "modules": modules, **{f"modules.{name}": module for name, module in submodules.items()}}
+
+
+# --- requests ---------------------------------------------------------------------------------------------------------
+
+def make_img2img(init_images, **fields):
+    return StableDiffusionProcessingImg2Img(prompt="a dog", negative_prompt="", seed=-1, init_images=init_images,
+                                            **fields)
+
+
+def run_args(**overrides):
+    """`Script.run` arguments after `p`, in the order `Script.ui` returns its components."""
+    args = dict(dit_model_name=DIT, vae_model_name=VAE, seed=-1, resolution=1080, input_noise=0.0, latent_noise=0.0,
+                force_reload=False, unload_sd=True, save_original=False, use_tile_vae=True, tile_size=1024,
+                tile_overlap=128, debug_mode=False, after_run="Unload SeedVR2", blocks_to_swap=0,
+                swap_io_components=False)
+    args.update(overrides)
+    return args
