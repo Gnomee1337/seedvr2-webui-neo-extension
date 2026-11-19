@@ -53,6 +53,7 @@ RUN_PARAMETER_LABELS = {
     "save_original": "Save Extra Copy of Original", "use_tile_vae": "Enable VAE Tiling", "tile_size": "VAE Tile Size",
     "tile_overlap": "Tile Overlap", "debug_mode": "Show Debug Logs", "after_run": "After run",
     "blocks_to_swap": "BlockSwap: DiT blocks kept in RAM", "swap_io_components": "BlockSwap: I/O layers too",
+    "size_mode": "Output Size Mode", "scale_factor": "Scale Factor", "long_edge": "Output Long Edge (px)",
 }
 
 
@@ -391,6 +392,86 @@ def test_run_accepts_the_arguments_of_an_older_ui(script, make_txt2img):
     args = list(run_args().values())[:13]
     processed = script.run(make_txt2img(), *args)
     assert processed.images[0].size == UPSCALED_SIZE
+
+
+def test_run_with_the_arguments_before_the_size_modes_keeps_the_shortest_edge(script, pipeline):
+    """API callers built before the size modes pass 16 arguments, ending with the BlockSwap I/O flag."""
+    args = list(run_args(resolution=1536).values())[:16]
+    processed = script.run(make_img2img([Image.new("RGB", (512, 384)), Image.new("RGB", (1024, 768))]), *args)
+    assert [kwargs["resolution"] for kwargs in pipeline.generation_kwargs] == [1536, 1536]
+    assert all("SeedVR2 Resolution: 1536" in infotext and "SeedVR2 Size Mode: Shortest edge" in infotext
+               for infotext in processed.infotexts)
+
+
+# --- output size modes -----------------------------------------------------------------------------------------------
+
+def test_scale_factor_gives_each_input_size_its_own_resolution(script, pipeline, capsys):
+    inputs = [Image.new("RGB", (512, 384)), Image.new("RGB", (1024, 768)), Image.new("RGB", (512, 384))]
+    processed = run(script, make_img2img(inputs), size_mode="Scale factor", scale_factor=2)
+    assert [(len(kwargs_pass), kwargs["resolution"], kwargs["max_resolution"])
+            for kwargs_pass, kwargs in zip(pipeline.passes, pipeline.generation_kwargs)] == [(2, 768, 3072),
+                                                                                            (1, 1536, 3840)]
+    assert ["SeedVR2 Resolution: 768" in processed.infotexts[0], "SeedVR2 Resolution: 1536" in processed.infotexts[1],
+            "SeedVR2 Resolution: 768" in processed.infotexts[2]] == [True] * 3
+    assert all("SeedVR2 Size Mode: Scale factor, SeedVR2 Scale: 2.0" in infotext for infotext in processed.infotexts)
+    console = capsys.readouterr().out
+    assert "2 images 512x384 -> 1024x768" in console and "1 image 1024x768 -> 2048x1536" in console
+
+
+def test_long_edge_mode_names_the_long_edge_and_keeps_it(script, pipeline):
+    processed = run(script, make_img2img([Image.new("RGB", (1920, 1080))]), size_mode="Long edge", long_edge=2048)
+    assert pipeline.generation_kwargs[0]["resolution"] == 1152
+    assert "SeedVR2 Resolution: 1152" in processed.infotexts[0]
+    assert "SeedVR2 Size Mode: Long edge, SeedVR2 Long Edge: 2048" in processed.infotexts[0]
+
+
+def test_small_input_raised_to_512_is_noted_in_the_console(script, pipeline, capsys):
+    run(script, make_img2img([Image.new("RGB", (384, 384))]), size_mode="Scale factor", scale_factor=1)
+    assert pipeline.generation_kwargs[0]["resolution"] == 512
+    assert "384x384 -> 512x512 (raised to the 512 px minimum)" in capsys.readouterr().out
+
+
+@pytest.mark.parametrize("size_mode, scale_factor, long_edge", [("8K", 2, 2048), (None, "x", None), (3, -1, 10**9),
+                                                                 ("Scale factor", float("nan"), "abc"),
+                                                                 ("Long edge", None, float("inf"))])
+def test_hostile_size_values_from_the_api_fall_back_instead_of_failing(script, pipeline, size_mode, scale_factor,
+                                                                       long_edge):
+    processed = run(script, make_img2img([Image.new("RGB", (1024, 576))]), size_mode=size_mode,
+                    scale_factor=scale_factor, long_edge=long_edge)
+    assert "SeedVR2 Error" not in processed.infotexts[0]
+    assert 512 <= pipeline.generation_kwargs[0]["resolution"] <= 3840
+
+
+def test_size_mode_shows_only_its_own_control(script):
+    script.ui(is_img2img=False)
+    assert [update["visible"] for update in script._show_size_controls("Scale factor")] == [False, True, False]
+    assert [update["visible"] for update in script._show_size_controls("Long edge")] == [False, False, True]
+    assert [update["visible"] for update in script._show_size_controls("garbage")] == [True, False, False]
+
+
+def test_size_controls_start_in_the_shortest_edge_mode_with_the_old_label(script):
+    """The old label keeps the px value users saved in ui-config.json; new controls have new labels."""
+    components = {component.kwargs["label"]: component for component in script.ui(is_img2img=True)}
+    assert components["Output Size Mode"].kwargs["value"] == "Shortest edge"
+    assert components["Upscale Resolution (Shortest Edge)"].kwargs["value"] == 1080
+    assert (components["Scale Factor"].kwargs["value"], components["Output Long Edge (px)"].kwargs["value"]) == (2.0,
+                                                                                                                2048)
+
+
+def test_quick_scale_buttons_set_the_factor(script, script_module, monkeypatch):
+    buttons = []
+    button_class = script_module.gr.Button
+
+    def recording_button(*args, **kwargs):
+        buttons.append(button_class(*args, **kwargs))
+        return buttons[-1]
+
+    monkeypatch.setattr(script_module.gr, "Button", recording_button)
+    components = {component.kwargs["label"]: component for component in script.ui(is_img2img=True)}
+    quick = [button for button in buttons if str(button.kwargs.get("value", "")).startswith("×")]
+    assert {button.kwargs["value"]: button.events[0]["fn"]() for button in quick} == {"×1.5": 1.5, "×2": 2.0,
+                                                                                      "×4": 4.0}
+    assert all(button.events[0]["outputs"] == [components["Scale Factor"]] for button in quick)
 
 
 # --- the calls into the vendored pipeline ----------------------------------------------------------------------------

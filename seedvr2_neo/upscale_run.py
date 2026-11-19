@@ -10,7 +10,7 @@ import os
 import traceback
 from dataclasses import dataclass
 from types import SimpleNamespace
-from typing import Callable, Dict, List, Optional
+from typing import Callable, Dict, List, Optional, Tuple
 
 import numpy as np
 import torch
@@ -20,7 +20,7 @@ from torchvision import transforms
 from seedvr2_neo.memory_plan import CPU_DEVICE, MemoryPlan
 from seedvr2_neo.model_lifecycle import DIT_CACHE_ID, VAE_CACHE_ID, ModelLifecycle
 from seedvr2_neo.run_inputs import group_by_shape, split_into_passes
-from seedvr2_neo.upscale_settings import UpscaleSettings
+from seedvr2_neo.upscale_settings import OutputTarget, UpscaleSettings
 
 # Why images come back without upscaling when the user pressed Interrupt (infotext and result comment).
 INTERRUPTED_MESSAGE = "Interrupted"
@@ -96,6 +96,15 @@ def tensor_to_images(frames: torch.Tensor) -> List[Image.Image]:
             for frame in frames]
 
 
+def describe_target(size: Tuple[int, int], target: OutputTarget, count: int) -> str:
+    """The console line naming the output size of one group of same-sized inputs."""
+    width, height = size
+    out_width, out_height = target.output_size(size)
+    images = "image" if count == 1 else "images"
+    raised = f" (raised to the {target.resolution} px minimum)" if target.raised_to_minimum else ""
+    return f"[SeedVR2] {count} {images} {width}x{height} -> {out_width}x{out_height}{raised}"
+
+
 class UpscaleRun:
     """One run of the pipeline over the inputs of one Generate press."""
 
@@ -123,11 +132,17 @@ class UpscaleRun:
         failure = None
         try:
             debug = self._pipeline.Debug(enabled=debug_mode)
-            passes = split_into_passes(group_by_shape(inputs), inputs, request.settings.resolution)
+            groups = group_by_shape(inputs)
+            targets = {size: request.settings.target_for(size) for size in {image.size for image in inputs}}
+            for group in groups:
+                size = inputs[group[0]].size
+                print(describe_target(size, targets[size], len(group)))
+            passes = split_into_passes(groups, inputs, lambda size: targets[size].output_pixels(size))
             if len(passes) > 1: print(f"[SeedVR2] {len(inputs)} images in {len(passes)} pipeline passes.")
             for pass_indices in passes:
                 self.check_interruption()
-                outputs = self._upscale_pass([inputs[index] for index in pass_indices], request, debug, debug_mode)
+                pass_images = [inputs[index] for index in pass_indices]
+                outputs = self._upscale_pass(pass_images, targets[pass_images[0].size], request, debug, debug_mode)
                 upscaled.update(zip(pass_indices, outputs))
             if not debug_mode: print("[SeedVR2] Done.")
         except UpscaleInterrupted:
@@ -145,17 +160,17 @@ class UpscaleRun:
                   else "[SeedVR2] Models unloaded, memory released.")
         return UpscaleOutcome(upscaled, failure)
 
-    def _upscale_pass(self, pass_images: List[Image.Image], request: UpscaleRequest, debug,
+    def _upscale_pass(self, pass_images: List[Image.Image], target: OutputTarget, request: UpscaleRequest, debug,
                       debug_mode: bool) -> List[Image.Image]:
-        """Upscale images of one size and mode in one pipeline pass, as frames of one tensor."""
+        """Upscale images of one size and mode to `target` in one pipeline pass, as frames of one tensor."""
         frames = images_to_tensor(pass_images)
-        output = self._upscale_tensor(frames, request, debug, debug_mode)
+        output = self._upscale_tensor(frames, target, request, debug, debug_mode)
         outputs = tensor_to_images(output)
         if len(outputs) != len(pass_images):
             raise RuntimeError(f"the pipeline returned {len(outputs)} images for {len(pass_images)} inputs")
         return outputs
 
-    def _upscale_tensor(self, img_tensor: torch.Tensor, request: UpscaleRequest, debug,
+    def _upscale_tensor(self, img_tensor: torch.Tensor, target: OutputTarget, request: UpscaleRequest, debug,
                         debug_mode: bool) -> torch.Tensor:
         """Run the four SeedVR2 phases on a [N, H, W, C] tensor of N same-sized images and return the pipeline's output.
 
@@ -198,7 +213,7 @@ class UpscaleRun:
         ctx['cache_context'] = cache_context
 
         frames_tensor, _generation_info = pipeline.compute_generation_info(
-            ctx=ctx, images=img_tensor, resolution=settings.resolution, max_resolution=settings.max_resolution,
+            ctx=ctx, images=img_tensor, resolution=target.resolution, max_resolution=target.max_resolution,
             batch_size=1, uniform_batch_size=False, seed=request.seed,
             prepend_frames=0, temporal_overlap=0, debug=debug
         )
@@ -208,7 +223,7 @@ class UpscaleRun:
         ctx = pipeline.encode_all_batches(runner, ctx=ctx, images=frames_tensor, debug=debug, batch_size=1,
                                           uniform_batch_size=False, seed=request.seed,
                                           progress_callback=self.check_interruption, temporal_overlap=0,
-                                          resolution=settings.resolution, max_resolution=settings.max_resolution,
+                                          resolution=target.resolution, max_resolution=target.max_resolution,
                                           input_noise_scale=settings.input_noise, color_correction=COLOR_CORRECTION)
         self._hooks.release_memory()
 

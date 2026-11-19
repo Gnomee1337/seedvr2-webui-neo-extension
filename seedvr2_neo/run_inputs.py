@@ -5,7 +5,7 @@ is tested outside Forge. What happens to the results (saving, infotexts): `seedv
 """
 
 import random
-from typing import Any, Dict, Hashable, List, Optional, Sequence, Tuple, TypeVar
+from typing import Any, Callable, Dict, Hashable, List, Optional, Sequence, Tuple, TypeVar
 
 import numpy as np
 from PIL import Image
@@ -88,9 +88,11 @@ def group_by_shape(images: Sequence[Image.Image]) -> List[List[int]]:
     return list(groups.values())
 
 
-def split_into_passes(groups: Sequence[Sequence[int]], images: Sequence[Image.Image], resolution: int,
+def split_into_passes(groups: Sequence[Sequence[int]], images: Sequence[Image.Image],
+                      output_pixels: Callable[[Tuple[int, int]], int],
                       budget_pixels: int = PASS_BUDGET_PIXELS) -> List[List[int]]:
-    """The groups cut into pipeline passes whose upscaled frames add up to at most `budget_pixels`.
+    """The groups cut into pipeline passes whose upscaled frames add up to at most `budget_pixels`; `output_pixels`
+    gives the upscaled pixels of an input of a size (width, height).
 
     A pass holds all its input and output frames in RAM at once; without a limit a batch of hundreds of images, or an
     API call with many inputs, would exhaust it. One frame larger than the budget still gets a pass of its own.
@@ -100,7 +102,7 @@ def split_into_passes(groups: Sequence[Sequence[int]], images: Sequence[Image.Im
         current: List[int] = []
         current_pixels = 0
         for index in group:
-            pixels = estimate_output_pixels(images[index].size, resolution)
+            pixels = output_pixels(images[index].size)
             if current and current_pixels + pixels > budget_pixels:
                 passes.append(current)
                 current, current_pixels = [], 0
@@ -109,13 +111,6 @@ def split_into_passes(groups: Sequence[Sequence[int]], images: Sequence[Image.Im
         if current:
             passes.append(current)
     return passes
-
-
-def estimate_output_pixels(size: Tuple[int, int], resolution: int) -> int:
-    """Pixels of an image of `size` (width, height) after upscaling its shortest edge to `resolution`."""
-    width, height = (max(1, int(side)) for side in size)
-    shortest, longest = min(width, height), max(width, height)
-    return int(resolution * resolution * longest / shortest)
 
 
 def _wide_grayscale_to_8_bit(image: Image.Image) -> Image.Image:

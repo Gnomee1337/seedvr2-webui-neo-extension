@@ -54,7 +54,7 @@ class Component:
 
 def make_gradio() -> types.ModuleType:
     gradio = types.ModuleType("gradio")
-    for name in ("Row", "Accordion", "Dropdown", "Markdown", "Number", "Slider", "Checkbox", "Radio", "Button"):
+    for name in ("Row", "Column", "Accordion", "Dropdown", "Markdown", "Number", "Slider", "Checkbox", "Radio", "Button"):
         setattr(gradio, name, type(name, (Component,), {}))
     gradio.update = lambda **kwargs: {"__type__": "update", **kwargs}
     return gradio
@@ -460,6 +460,6 @@ def run_args(**overrides):
     args = dict(dit_model_name=DIT, vae_model_name=VAE, seed=-1, resolution=1080, input_noise=0.0, latent_noise=0.0,
                 force_reload=False, unload_sd=True, save_original=False, use_tile_vae=True, tile_size=512,
                 tile_overlap=128, debug_mode=False, after_run="Unload SeedVR2", blocks_to_swap=0,
-                swap_io_components=False)
+                swap_io_components=False, size_mode="Shortest edge", scale_factor=2.0, long_edge=2048)
     args.update(overrides)
     return args

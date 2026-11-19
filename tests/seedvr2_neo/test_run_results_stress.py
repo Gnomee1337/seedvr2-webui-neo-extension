@@ -16,10 +16,10 @@ from dataclasses import FrozenInstanceError
 import pytest
 
 from seedvr2_neo import run_results as rr
+from seedvr2_neo.upscale_settings import parse_upscale_settings
 
 # Forge / A1111 `re_param_code`
 RE_PARAM = re.compile(r'\s*(\w[\w \-/]+):\s*("(?:\\.|[^\\"])+"|[^,]*)(?:,|$)')
-SEEDVR2_KEYS = [param.value for param in rr.GenerationParam if param is not rr.GenerationParam.ERROR]
 
 
 def parse_like_forge(infotext: str):
@@ -49,10 +49,18 @@ def parse_like_forge(infotext: str):
     return prompt, negative, params
 
 
+SETTINGS = parse_upscale_settings(1080, 0.0, 0.0, True, 512, 128)
+
+
 def success_params(**overrides):
-    params = rr.seedvr2_generation_params("seedvr2_ema_3b_fp8_e4m3fn.safetensors", "ema_vae_fp16.safetensors", 1080, 42)
+    params = rr.seedvr2_generation_params("seedvr2_ema_3b_fp8_e4m3fn.safetensors", "ema_vae_fp16.safetensors",
+                                          SETTINGS, (1024, 1024), 42)
     params.update(overrides)
     return params
+
+
+# The keys of an upscale in the default (shortest edge) mode.
+SEEDVR2_KEYS = list(success_params())
 
 
 HOSTILE_VALUES = [
@@ -273,7 +281,7 @@ def test_failure_infotext_has_at_least_three_params_so_forge_reads_it():
     _, _, params = parse_like_forge(infotext)
 
     assert params["SeedVR2 Error"] == "Runtime Error: boom"
-    assert len(params) == 5
+    assert len(params) == len(SEEDVR2_KEYS) + 1
 
 
 # --- seedvr2_generation_params ---------------------------------------------------------------------------------------
@@ -285,9 +293,10 @@ def test_success_params_always_reach_forge_three_param_threshold_alone():
 
 
 @pytest.mark.parametrize("seed", [0, 2 ** 32 - 1, -1])
-@pytest.mark.parametrize("resolution", [512, 3840, 0])
+@pytest.mark.parametrize("resolution", [512, 3840])
 def test_success_params_keep_values_as_given(seed, resolution):
-    params = rr.seedvr2_generation_params("d", "v", resolution, seed)
+    settings = parse_upscale_settings(resolution, 0.0, 0.0, True, 512, 128)
+    params = rr.seedvr2_generation_params("d", "v", settings, (640, 480), seed)
 
     assert params["SeedVR2 Seed"] == seed and params["SeedVR2 Resolution"] == resolution
 

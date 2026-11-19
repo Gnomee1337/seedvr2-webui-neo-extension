@@ -32,12 +32,16 @@ from seedvr2_neo.run_results import InputDetails, RunImage, SavePlan, describe_g
     describe_uploaded_inputs, finish_images, merge_run_images, not_upscaled_comment, plan_saving, read_option, \
     seedvr2_generation_params
 from seedvr2_neo.upscale_run import INTERRUPTED_MESSAGE, HostHooks, UpscaleRequest, UpscaleRun, import_pipeline
-from seedvr2_neo.upscale_settings import NOISE, RESOLUTION, TILE_OVERLAP, TILE_SIZE, USE_TILE_VAE_DEFAULT, Bounds, \
+from seedvr2_neo.upscale_settings import DEFAULT_SIZE_MODE, LONG_EDGE, MAX_OUTPUT_LONG_EDGE, NOISE, RESOLUTION, \
+    SCALE_FACTOR, TILE_OVERLAP, TILE_SIZE, USE_TILE_VAE_DEFAULT, Bounds, SizeMode, parse_size_mode, \
     parse_upscale_settings
 
 # File name suffixes of the saved upscaled image and of the extra copy of the image before the upscale.
 RESULT_SUFFIX = "-seedvr2"
 ORIGINAL_SUFFIX = "-original"
+
+# The quick buttons next to the scale factor slider.
+QUICK_SCALE_FACTORS = (1.5, 2.0, 4.0)
 
 # Forge options the script reads itself (with the request's `override_settings`).
 SAMPLES_SAVE_OPTION = "samples_save"
@@ -126,7 +130,7 @@ def save_originals(p, inputs: List[Image.Image], details: List[InputDetails]) ->
         save_result_image(p, image, index, input_details, input_details.infotext.with_params({}), ORIGINAL_SUFFIX)
 
 
-def build_result(p, run_images: List[RunImage], details: List[InputDetails], params: Mapping[str, Any],
+def build_result(p, run_images: List[RunImage], details: List[InputDetails], params: List[Mapping[str, Any]],
                  failure: Optional[str], result_seed: int, save_plan: SavePlan) -> Processed:
     """Forge's result: one image and one infotext per input. Upscaled images are saved by the user's settings; when
     some are not upscaled, the result gets a comment saying so."""
@@ -166,7 +170,25 @@ class Script(scripts.Script):
 
         with gr.Row():
             seed = gr.Number(label="Seed (-1 = Random/Follow)", value=-1, precision=0)
-            resolution = gr.Slider(label="Upscale Resolution (Shortest Edge)", **slider_range(RESOLUTION))
+            size_mode = gr.Radio(label="Output Size Mode", choices=[mode.value for mode in SizeMode],
+                                 value=DEFAULT_SIZE_MODE.value,
+                                 info="Scale factor and Long edge keep the long edge at most "
+                                      f"{MAX_OUTPUT_LONG_EDGE} px; no input is upscaled below 512 px")
+        # Only the active mode's control is shown. Forge keeps each one's value in ui-config.json under its label;
+        # the shortest edge slider keeps its old label so the values users saved still apply.
+        with gr.Row():
+            with gr.Column(visible=DEFAULT_SIZE_MODE is SizeMode.SHORTEST_EDGE) as shortest_edge_controls:
+                resolution = gr.Slider(label="Upscale Resolution (Shortest Edge)", **slider_range(RESOLUTION))
+            with gr.Column(visible=DEFAULT_SIZE_MODE is SizeMode.SCALE_FACTOR) as scale_factor_controls:
+                scale_factor = gr.Slider(label="Scale Factor", **slider_range(SCALE_FACTOR))
+                with gr.Row():
+                    for factor in QUICK_SCALE_FACTORS:
+                        gr.Button(value=f"×{factor:g}", size="sm").click(fn=lambda factor=factor: factor,
+                                                                        inputs=[], outputs=[scale_factor])
+            with gr.Column(visible=DEFAULT_SIZE_MODE is SizeMode.LONG_EDGE) as long_edge_controls:
+                long_edge = gr.Slider(label="Output Long Edge (px)", **slider_range(LONG_EDGE))
+        size_mode.change(fn=self._show_size_controls, inputs=[size_mode],
+                         outputs=[shortest_edge_controls, scale_factor_controls, long_edge_controls])
 
         with gr.Row():
             unload_sd = gr.Checkbox(label="Unload SD Checkpoint", value=True, elem_classes="force-unload",
@@ -202,7 +224,14 @@ class Script(scripts.Script):
                                          **slider_range(TILE_OVERLAP))
 
         return [dit_model, vae_model, seed, resolution, input_noise, latent_noise, force_reload, unload_sd, save_original,
-                use_tile_vae, tile_size, tile_overlap, debug_mode, after_run, blocks_to_swap, swap_io_components]
+                use_tile_vae, tile_size, tile_overlap, debug_mode, after_run, blocks_to_swap, swap_io_components,
+                size_mode, scale_factor, long_edge]
+
+    @staticmethod
+    def _show_size_controls(size_mode):
+        """Show the control of the chosen size mode, hide the other two."""
+        chosen = parse_size_mode(size_mode)
+        return tuple(gr.update(visible=chosen is mode) for mode in SizeMode)
 
     @staticmethod
     def _refresh_models(current_dit, current_vae):
@@ -222,7 +251,10 @@ class Script(scripts.Script):
 
     def run(self, p, dit_model_name, vae_model_name, seed, resolution, input_noise, latent_noise, force_reload, unload_sd,
             save_original, use_tile_vae, tile_size, tile_overlap, debug_mode, after_run=AfterRun.UNLOAD.value,
-            blocks_to_swap=0, swap_io_components=False):
+            blocks_to_swap=0, swap_io_components=False, size_mode=DEFAULT_SIZE_MODE.value,
+            scale_factor=SCALE_FACTOR.default, long_edge=LONG_EDGE.default):
+        # Parameters with defaults were added after the first API callers. Forge passes a shorter script_args list
+        # as is, so an older caller gets the behaviour it was written for.
         # Checked before the base image is generated, so a bad selection costs no generation time
         scan = scan_seedvr2_models()
         setup_error = find_selection_error(scan, dit_model_name, vae_model_name)
@@ -238,7 +270,8 @@ class Script(scripts.Script):
             return empty_result(p, f"Error: cannot import the SeedVR2 pipeline ({type(e).__name__}; see the console)")
 
         # Read before any generation, so a bad API value costs nothing
-        settings = parse_upscale_settings(resolution, input_noise, latent_noise, use_tile_vae, tile_size, tile_overlap)
+        settings = parse_upscale_settings(resolution, input_noise, latent_noise, use_tile_vae, tile_size, tile_overlap,
+                                          size_mode, scale_factor, long_edge)
         memory_plan = build_memory_plan(after_run, blocks_to_swap, swap_io_components)
 
         is_txt2img = isinstance(p, StableDiffusionProcessingTxt2Img)
@@ -264,7 +297,8 @@ class Script(scripts.Script):
         outcome = UpscaleRun(pipeline, MODEL_LIFECYCLE, forge_hooks()).upscale_images(collected.images, request,
                                                                                        force_reload, debug_mode)
 
-        params = seedvr2_generation_params(dit_model_name, vae_model_name, settings.resolution, collected.seed)
+        params = [seedvr2_generation_params(dit_model_name, vae_model_name, settings, image.size, collected.seed)
+                  for image in collected.images]
         return build_result(p, merge_run_images(collected.images, outcome.upscaled), collected.details, params,
                             outcome.failure, collected.result_seed, save_plan)
 
