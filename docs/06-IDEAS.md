@@ -44,3 +44,4 @@ peak VRAM per model and resolution (weight 2).
 
 ## Rejected by the owner
 So we don't propose them again. One line each: idea — why not.
+- A suggested GPU profile from the detected VRAM, and a 6 GB profile — the owner keeps Manual plus 8 / 12 / 24 GB; users of other GPUs pick the nearest or set the sliders.
