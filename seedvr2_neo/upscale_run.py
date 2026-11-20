@@ -175,6 +175,7 @@ class UpscaleRun:
         self._hooks = hooks
         self._progress = RunProgress([1], hooks.report_progress)
         self._dit_blocks: Tuple[type, ...] = ()  # set only while the DiT phase runs
+        self._tile_module_id: Optional[int] = None  # PROTOTYPE: id of the VAE decoder while decoding
 
     def check_interruption(self) -> None:
         """Stop the run when the user pressed Interrupt. Only Interrupt does: Forge's "Stop generating"
@@ -192,6 +193,8 @@ class UpscaleRun:
         self.check_interruption()
         if self._dit_blocks and isinstance(module, self._dit_blocks):
             self._progress.block_started()
+        if self._tile_module_id is not None and id(module) == self._tile_module_id:
+            torch.cuda.empty_cache()  # PROTOTYPE
 
     def upscale_images(self, inputs: List[Image.Image], request: UpscaleRequest, force_reload: bool,
                        debug_mode: bool) -> UpscaleOutcome:
@@ -289,8 +292,14 @@ class UpscaleRun:
 
             if not debug_mode: print(f"[SeedVR2] Phase 3/4: Decoding {tiled_note}...")
             self._progress.start_phase(DECODE_PHASE)
-            ctx = pipeline.decode_all_batches(runner, ctx=ctx, debug=debug, progress_callback=self.phase_progress,
-                                              cache_model=plan.cache_models)
+            decoder = getattr(getattr(runner, "vae", None), "decoder", None)
+            self._tile_module_id = id(decoder) if decoder is not None else None
+            decoder = None
+            try:
+                ctx = pipeline.decode_all_batches(runner, ctx=ctx, debug=debug, progress_callback=self.phase_progress,
+                                                  cache_model=plan.cache_models)
+            finally:
+                self._tile_module_id = None
             self._hooks.release_memory()
 
             if not debug_mode: print("[SeedVR2] Phase 4/4: Post-processing...")
