@@ -10,6 +10,7 @@ from dataclasses import dataclass
 from enum import Enum
 from typing import Any, Dict, Generic, List, Mapping, Optional, Sequence, Tuple, TypeVar
 
+from seedvr2_neo.pipeline_options import PipelineOptions
 from seedvr2_neo.upscale_settings import SizeMode, UpscaleSettings
 
 T = TypeVar("T")
@@ -32,6 +33,8 @@ class GenerationParam(str, Enum):
     SIZE_MODE = "SeedVR2 Size Mode"
     SCALE_FACTOR = "SeedVR2 Scale"
     LONG_EDGE = "SeedVR2 Long Edge"
+    COLOR_CORRECTION = "SeedVR2 Color Correction"
+    ATTENTION = "SeedVR2 Attention"
     ERROR = "SeedVR2 Error"
 
 
@@ -78,9 +81,10 @@ def read_option(override_settings: Any, name: str, default: Any) -> Any:
 
 
 def seedvr2_generation_params(dit_model: str, vae_model: str, settings: UpscaleSettings, size: Tuple[int, int],
-                              seed: int) -> Dict[str, Any]:
+                              seed: int, options: PipelineOptions = PipelineOptions()) -> Dict[str, Any]:
     """Parameters of the upscale of an input of `size` (width, height), added to its infotext. The resolution is the
-    shortest edge this input was upscaled to, which in the scale factor and long edge modes depends on its size."""
+    shortest edge this input was upscaled to, which in the scale factor and long edge modes depends on its size. The
+    attention backend is the one the run used, after any fallback to `sdpa`."""
     params = {
         GenerationParam.MODEL.value: dit_model,
         GenerationParam.VAE.value: vae_model,
@@ -92,6 +96,8 @@ def seedvr2_generation_params(dit_model: str, vae_model: str, settings: UpscaleS
         params[GenerationParam.SCALE_FACTOR.value] = settings.scale_factor
     elif settings.size_mode is SizeMode.LONG_EDGE:
         params[GenerationParam.LONG_EDGE.value] = settings.long_edge
+    params[GenerationParam.COLOR_CORRECTION.value] = options.color_correction.value
+    params[GenerationParam.ATTENTION.value] = options.attention_mode.value
     return params
 
 

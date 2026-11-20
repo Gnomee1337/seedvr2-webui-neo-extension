@@ -28,9 +28,6 @@ Now one folder is used: `<models_path>/SeedVR2`, else the extension's `models/Se
 models in one dropdown with the folder shown (weight 2); read Forge's extra model paths, if Neo has them (weight 2, needs
 a fact check first). Questions for the owner: does anyone keep SeedVR2 models outside one folder?
 
-## Optional attention backends
-SageAttention / FlashAttention are supported in `seedvr2_vendor/` but fixed to `sdpa`. Expose them in "Advanced" when installed (weight 1). Part of B08 if taken.
-
 ## Settings in Forge's Settings tab
 Model folder, default unload behaviour and default tile size as Forge options (`shared.opts`) instead of per-run controls (weight 2).
 
@@ -47,3 +44,4 @@ peak VRAM per model and resolution (weight 2).
 
 ## Rejected by the owner
 So we don't propose them again. One line each: idea — why not.
+- A suggested GPU profile from the detected VRAM, and a 6 GB profile — the owner keeps Manual plus 8 / 12 / 24 GB; users of other GPUs pick the nearest or set the sliders.

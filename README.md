@@ -20,8 +20,7 @@ port [numz/ComfyUI-SeedVR2_VideoUpscaler](https://github.com/numz/ComfyUI-SeedVR
    stops with "local changes would be overwritten" (old versions kept compiled `.pyc` files in git), run
    `git reset --hard origin/main` in the extension folder; it discards local edits to the extension's files.
 
-Install only one SeedVR2 extension for Forge. The original one shows the same name in the **Script** list, and each
-keeps its own copy of the models in memory.
+Install only one SeedVR2 extension for Forge: each keeps its own copy of the models in memory.
 
 ## Models
 
@@ -43,7 +42,7 @@ After adding a model, press 🔄 next to the model dropdowns — no restart need
 
 ## Usage
 
-Select **SeedVR2 Native Upscaler (24G)** in the **Script** dropdown at the bottom of the txt2img or img2img tab.
+Select **SeedVR2 Upscaler** in the **Script** dropdown at the bottom of the txt2img or img2img tab.
 Usually you only need to choose the output size with **Output Size Mode**:
 
 - **Scale factor** (default, ×2) — ×1.0 to ×4.0 of each image's own size (buttons ×1.5 / ×2 / ×4 next to the
@@ -66,8 +65,13 @@ console also prints it per group of same-sized images, e.g. `[SeedVR2] 2 images 
 - **img2img** — the img2img diffusion pass is skipped; every input image is upscaled with SeedVR2 directly (the
   **Batch** tab works too). Grayscale, palette and 16-bit images become RGB; transparency is kept.
 
+While the upscale runs, Forge's progress bar shows its phase (Encoding, Upscaling, Decoding, Post-processing) and
+moves inside the long DiT step too. **Interrupt** stops the upscale within a few seconds, even in the middle of the DiT
+step or of the VAE decoding (the console may show an `Error in Phase …` line from the pipeline right before
+"Process Interrupted by User": that is the interrupt, not a crash); **Skip** and "Stop generating" let it finish.
+
 Each result keeps its generation parameters plus `SeedVR2 …` keys (model, VAE, the shortest edge it was upscaled to,
-seed, size mode with its factor or long edge). Files are written
+seed, size mode with its factor or long edge, color correction, attention). Files are written
 like Forge's own: with **Settings → Saving images → Always save all generated images** on, each upscaled image is saved
 with the `-seedvr2` suffix; with it off (or `save_images: false` in an API call) the extension writes no files at all.
 **Save Extra Copy of Original** also saves the img2img input image (`-original`); txt2img images are saved by Forge.
@@ -79,6 +83,16 @@ reloaded on the next generation.
 the tile size. Older versions had a slider called "Tile Size" with a default of 1024: after updating from one, the tile size is
 reset to 512 one time, so a larger value you had set on purpose needs setting again (on 12–24 GB GPUs a larger tile
 means fewer tiles and a faster VAE).
+
+**Color Correction** (Advanced Settings) matches the result's colors to the input: `lab` (default, the closest),
+`wavelet`, `wavelet_adaptive`, `hsv`, `adain`, or `none` for the model's own colors. **Attention** is `sdpa` (built into
+PyTorch); `flash_attn_2` / `flash_attn_3` / `sageattn_2` / `sageattn_3` appear when their package is installed in
+Forge's Python. When the chosen one fails to load, a run uses version 2 of the same backend if that loaded, else
+`sdpa`, with a console note; the image parameters name the backend actually used.
+
+**GPU Profile** (next to BlockSwap) fills BlockSwap and the VAE tile size for an 8, 12 or 24 GB GPU and for the selected
+DiT (3B or 7B); the sliders stay as you can see them and can be changed afterwards (the profile then shows *Manual*).
+The 8 GB values are measured; the 12 and 24 GB ones are a reasonable start, not measured yet.
 
 **After run:** *Unload SeedVR2* (default) frees the SeedVR2 models from VRAM and RAM when the upscale ends;
 *Keep in RAM* keeps them for a faster next run at the cost of system RAM about the size of the two model files
@@ -106,19 +120,25 @@ them on every run anyway.
 
 ### API
 
-Send `"script_name": "SeedVR2 Native Upscaler (24G)"` to `/sdapi/v1/txt2img` or `/sdapi/v1/img2img` with
+Send `"script_name": "SeedVR2 Upscaler"` to `/sdapi/v1/txt2img` or `/sdapi/v1/img2img` with
 `script_args` in this order:
 
 ```
 dit_model, vae_model, seed, resolution, input_noise, latent_noise, force_reload, unload_sd, save_original,
 use_tile_vae, tile_size, tile_overlap, debug_mode, after_run, blocks_to_swap, swap_io_components,
-size_mode, scale_factor, long_edge
+size_mode, scale_factor, long_edge, color_correction, attention_mode
 ```
 
 `size_mode` is `"Scale factor"`, `"Shortest edge"` or `"Long edge"`. A missing or unknown `size_mode` means
 `"Shortest edge"`, as in versions before the modes, although the UI and `/sdapi/v1/script-info` show "Scale factor" as
-the default. Forge does not fill omitted arguments with the UI's values, so send all 19 (older callers' 13 or 16 still
-get the shortest edge). Numbers outside a slider's range are clamped to it.
+the default. `color_correction` and `attention_mode` take the strings listed above; a missing or unknown value means
+`"lab"` / `"sdpa"`. Forge does not fill omitted arguments with the UI's values, so send all 21 (older callers' 13, 16
+or 19 still work: 13 and 16 get the shortest edge, all of them `lab` and `sdpa`). Numbers outside a slider's range are
+clamped to it. The GPU profile is not an argument: send the slider values themselves.
+
+Versions before this one were called **SeedVR2 Native Upscaler (24G)**: an API call with that `script_name` now fails
+(HTTP 422) — use the new name. In the UI the Script dropdown starts at *None* once after the update; the saved slider
+values are kept.
 
 <img width="1660" height="694" alt="Extension UI" src="https://github.com/user-attachments/assets/777c34e7-aca6-4e51-9994-f02f817311ea" />
 

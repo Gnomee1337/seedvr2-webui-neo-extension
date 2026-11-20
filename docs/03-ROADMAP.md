@@ -22,7 +22,7 @@ PROGRESS = (sum of weights of ✅ blocks) / (sum of weights of ALL blocks) × 10
 
 ## Summary
 
-**Sum of weights: 33. Closed: 25. PROGRESS: 75%.**
+**Sum of weights: 33. Closed: 28. PROGRESS: 84%.**
 
 ## Delivery requirements (REQ-1…REQ-6, details — `docs/01-VISION.md`)
 
@@ -40,7 +40,7 @@ PROGRESS = (sum of weights of ✅ blocks) / (sum of weights of ALL blocks) × 10
 | # | Block | Weight | Status | What remains |
 |---|---|---|---|---|
 | B11 | Output size: Scale factor (×1.0–×4.0, quick ×1.5 / ×2 / ×4, the UI default ×2), Shortest edge (the API fallback) and Long edge (1024–3840 px, 4K measured live on 8 GB), per input size, long edge capped at 3840; the final size shown under the controls before a run; the UI regrouped (size group, memory, rare settings under Advanced) | 3 | ✅ | — |
-| B08 | Settings and feedback: color-correction and attention-mode choice, Forge progress bar, interrupt inside the DiT step, title without "(24G)"; GPU profiles (8 / 12 / 24 GB) that fill in tile size and BlockSwap, visible and editable | 3 | ⬜ | all |
+| B08 | Settings and feedback: color-correction and attention-mode choice, Forge progress bar, interrupt inside the DiT step, title without "(24G)"; GPU profiles (8 / 12 / 24 GB) that fill in tile size and BlockSwap, visible and editable | 3 | ✅ | — |
 | B12 | DiT tiling: the image split into overlapping tiles with feather blending, so 4K+ outputs fit on 8 GB; then 6K/8K in B11's long-edge mode. Quality across tile seams to be measured live | 5 | ⬜ | all |
 
 ## Foundation
@@ -54,7 +54,7 @@ PROGRESS = (sum of weights of ✅ blocks) / (sum of weights of ALL blocks) × 10
 ## How to check the sum
 Add up the "Weight" column across all tables — it must match "Sum of weights" in "Summary":
 B04 2 + B05 2 + B06 4 + B07 3 + B09 3 + B10 1 + B11 3 + B08 3 + B12 5 + B01 3 + B02 3 + B03 1 = **33**.
-Add up the weights of ✅ rows — that is "Closed": B01 3 + B02 3 + B03 1 + B04 2 + B05 2 + B06 4 + B07 3 + B09 3 + B10 1 + B11 3 = **25**.
+Add up the weights of ✅ rows — that is "Closed": B01 3 + B02 3 + B03 1 + B04 2 + B05 2 + B06 4 + B07 3 + B09 3 + B10 1 + B11 3 + B08 3 = **28**.
 
 ## Why this order
 B05 first: a wrong model folder leaves users with empty dropdowns, the most common first-run failure. B04 removed noise

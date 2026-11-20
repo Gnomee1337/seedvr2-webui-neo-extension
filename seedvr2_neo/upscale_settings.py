@@ -8,7 +8,7 @@ bad API value costs nothing. No Forge imports. Memory settings (After run, Block
 import math
 from dataclasses import dataclass
 from enum import Enum
-from typing import Any, Tuple
+from typing import Any, Tuple, Type, TypeVar
 
 from seedvr2_neo.memory_plan import parse_flag
 
@@ -152,14 +152,23 @@ def parse_upscale_settings(resolution: Any, input_noise: Any, latent_noise: Any,
 
 def parse_size_mode(value: Any) -> SizeMode:
     """The size mode named by `value` (case and surrounding spaces ignored), or `FALLBACK_SIZE_MODE`."""
-    if isinstance(value, SizeMode):
+    return parse_choice(value, SizeMode, FALLBACK_SIZE_MODE)
+
+
+Choice = TypeVar("Choice", bound=Enum)
+
+
+def parse_choice(value: Any, choices: Type[Choice], default: Choice) -> Choice:
+    """The member of the string enum `choices` named by `value` (its value, case and surrounding spaces ignored), or
+    `default` for anything else: an API caller may send any JSON value."""
+    if isinstance(value, choices):
         return value
     if isinstance(value, str):
         wanted = value.strip().casefold()
-        for mode in SizeMode:
-            if mode.value.casefold() == wanted:
-                return mode
-    return FALLBACK_SIZE_MODE
+        for member in choices:
+            if member.value.casefold() == wanted:
+                return member
+    return default
 
 
 def clamp_to_bounds(value: Any, bounds: Bounds) -> float:

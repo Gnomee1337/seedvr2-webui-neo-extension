@@ -75,7 +75,8 @@ def test_success_params_name_models_resolution_seed_and_size_mode():
     params = rr.seedvr2_generation_params("dit.safetensors", "vae.safetensors", settings(), (512, 384), 42)
 
     assert params == {"SeedVR2 Model": "dit.safetensors", "SeedVR2 VAE": "vae.safetensors",
-                      "SeedVR2 Resolution": 1080, "SeedVR2 Seed": 42, "SeedVR2 Size Mode": "Shortest edge"}
+                      "SeedVR2 Resolution": 1080, "SeedVR2 Seed": 42, "SeedVR2 Size Mode": "Shortest edge",
+                      "SeedVR2 Color Correction": "lab", "SeedVR2 Attention": "sdpa"}
 
 
 def test_scale_factor_params_name_the_factor_and_the_resolution_of_this_input():

@@ -54,6 +54,7 @@ RUN_PARAMETER_LABELS = {
     "tile_overlap": "Tile Overlap", "debug_mode": "Show Debug Logs", "after_run": "After run",
     "blocks_to_swap": "BlockSwap: DiT blocks kept in RAM", "swap_io_components": "BlockSwap: I/O layers too",
     "size_mode": "Output Size Mode", "scale_factor": "Scale Factor", "long_edge": "Output Long Edge (px)",
+    "color_correction": "Color Correction", "attention_mode": "Attention",
 }
 
 

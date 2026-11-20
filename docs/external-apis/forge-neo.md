@@ -106,6 +106,93 @@ Source: `modules/processing.py`.
 `shared.state.interrupted` (Interrupt button), `shared.state.stopping_generation` (Stop generating), both reset at job start;
 `state.job`, `state.job_no`, `state.job_count` drive the progress text. Source: `modules/shared_state.py`.
 
+### Progress bar and ETA for a script's own long work
+Source for every line: local `neo` checkout (branch `neo`), file:line named per item.
+- **Formula** (`modules/progress.py:104-118`, route `POST /internal/progress`, `progressapi` at line 91, a plain `def`):
+  `progress = 0`; `if job_count > 0: progress += job_no / job_count`; `if sampling_steps > 0 and job_count > 0:
+  progress += 1 / job_count * sampling_step / sampling_steps`; `progress = min(progress, 1)`. ETA: `elapsed = time.time() -
+  state.time_start`; `eta = elapsed / progress - elapsed` when `progress > 0`, else `None`. The progress is returned only
+  while the request's `id_task == current_task` (otherwise "Waiting..." / "In queue: n/m", lines 96-102). `textinfo` is
+  `shared.state.textinfo` (line 149). The legacy `/sdapi/v1/progress` (`modules/api/api.py:608-632`) uses the same
+  formula but adds 0.01 and returns `progress=0` when `job_count == 0`.
+- **Fields an extension sets** (class attributes with defaults, `modules/shared_state.py:17-34`): `job_count` and `job_no`
+  (job-level share), `sampling_steps` and `sampling_step` (share inside the current job), `textinfo` (free text shown by the
+  UI), `job` (free text, not in the formula). Do not touch `time_start` (set by `begin()`, line 124). `current_image` /
+  `assign_current_image(pil)` (lines 186-191) feeds the live preview (Extras calls it, `modules/postprocessing.py:100`);
+  it only matters when `opts.live_previews_enable`.
+- **`begin()` / `end()`** (`shared_state.py:121-147`): `begin` sets `job_count = -1`, `job_no = 0`, `sampling_step = 0`,
+  clears `skipped`/`interrupted`/`stopping_generation`/`textinfo`/`current_image`, sets `time_start`; `end` sets `job = ""`,
+  `job_count = 0`. `sampling_steps` is NOT reset by `begin()` or `end()`. In the UI flow `wrap_gradio_gpu_call` calls
+  `begin` / `end` around the whole txt2img/img2img function (`modules/call_queue.py:34-44`), and `wrap_gradio_call` resets the
+  flags, `job_count = 0` and `job` in a `finally` (lines 54-61). The API path does `begin(job="scripts_txt2img")` / `end()`
+  around a selectable script (`modules/api/api.py:477-488`, `551-562`). An extension must not call `begin`/`end` itself in
+  `run()`: they already wrap it, and `begin` resets the interrupt flags.
+- **Nothing in the formula moves unless the extension sets it.** `job_count` is `-1` after `begin`, so the formula gives 0
+  (`job_count > 0` is false) until someone sets it. `process_images_inner` sets `job_count = p.n_iter` only when it is `-1`
+  (`modules/processing.py:925-926`) and calls `state.nextjob()` after each batch (line 1018), so after `process_images` has
+  run, `job_no == job_count` and progress reads 100%. With Hires. fix, the first pass doubles `job_count`
+  (`processing.py:1323-1332`, once, guarded by `processing_has_refined_job_count`). The sampler sets `sampling_steps` /
+  `sampling_step` itself (`modules/sd_samplers_common.py:431, 439-440`). So a script that does its own long work after
+  `process_images` must write its own `job_count` / `job_no` / `sampling_step(s)` (or just `job_no`); nothing resets them
+  afterwards until the wrapper's `end()`. `ScriptRunner.run` only calls `script.run` and `shared.total_tqdm.clear()`
+  (`modules/scripts.py:781-797`), no state handling.
+- **Per-item pattern Forge uses itself** (Extras, `modules/postprocessing.py:51-58`): `state.job_count = N`, then per item
+  `state.nextjob()` (does `job_no += 1`, zeroes `sampling_step`, `preview_step`, `current_image_sampling_step`;
+  `shared_state.py:97-104`) and `state.textinfo = name`. Note `nextjob()` is called BEFORE the item, so the bar shows
+  `1/N` while item 1 is still running. Model merge (`modules/extras.py:121-199`) additionally sets `sampling_steps = total` and does
+  `sampling_step += 1` in its loop, so the bar moves smoothly inside one job. That is the "per-step" mechanism: there is no
+  callback/helper API, just writing these attributes. `scripts_postprocessing.py:193` sets `state.job = script.name`.
+- **`nextjob()`** also calls `do_set_current_image()` when `opts.live_previews_enable` and `show_progress_every_n_steps == -1`
+  (line 98-99); that returns at once while `current_latent is None` (line 160), so it is harmless for a script.
+- **Thread safety:** the progress route is a sync handler reading plain attributes with no lock; the generation runs under
+  `queue_lock` (`call_queue.py:34`) and writes the same attributes without a lock. Reads can see `job_no` and
+  `job_count` from different moments; the result is clamped by `min(progress, 1)`, so a torn read gives at worst a jumpy bar. A
+  `job_no > job_count` or `job_count == 0` cannot divide by zero (guards at lines 109, 111, 117).
+- **Side effects of changing `job_count` mid-run:** `shared_total_tqdm` reads `job_count * sampling_steps` only on its first
+  `reset()` (`modules/shared_total_tqdm.py:13`; console bar only). The Interrupt button uses `job_count > 1` to decide between
+  "stop after current image" and a hard interrupt (`modules/ui_toprow.py:119-124`, option `interrupt_after_current`), so a
+  script that sets `job_count` above 1 makes the first click a soft `stop_generating()`. In img2img Batch the runner sets
+  `state.job_count = len(batch_images) * p.n_iter` and `state.job = "i out of N"` BEFORE calling the script per file
+  (`modules/img2img.py:46, 62`; `job_count = len(batch_images) * p.n_iter`, set once before the loop, and the loop never
+  calls `nextjob()` — only `process_images` does, so a script that replaces it must advance `job_no` itself; checked in
+  the local Neo checkout), so a script that overwrites `job_count` per file breaks that outer bar; add to or restore
+  the outer values instead.
+- **`state.skipped`:** the Skip button sets it (`shared_state.py:85-87`); `begin()` clears it, `process_images_inner` clears it
+  at the top of each batch (`processing.py:931-932`), Extras clears it per item (`postprocessing.py:58`) and checks it after
+  the item (line 81). A script's own loop sees it only if it reads it; nothing stops the work automatically. Interrupt is
+  read the same way (`state.interrupted or state.stopping_generation`, `processing.py:934`).
+- **Extras: no reusable per-step callback.** `run_postprocessing` (`modules/postprocessing.py:12-109`) just writes
+  `job_count`, `nextjob()`, `textinfo`, `assign_current_image`; `ScriptPostprocessing.run` only sets `state.job`
+  (`scripts_postprocessing.py:172-208`); the per-step hooks for sampling are `CFGDenoiser` / `sd_samplers_common` and are not usable
+  for non-sampler work.
+
+### What depends on `Script.title()`
+Source: local `neo` checkout, `modules/scripts.py`, `modules/api/api.py`, `modules/ui_loadsave.py`.
+- **API `script_name`:** `script_name_to_index` compares `script.title().lower()` with `name.lower()` over
+  `script_runner.selectable_scripts` (selectable) or `script_runner.scripts` (always-on lookup) (`api.py:33-37, 279-285, 301-306`).
+  Case-insensitive, exact string, no aliases; no match is HTTP 422 "Script '...' not found". Changing the title breaks every
+  API caller that sends the old name. `script.name` (the `script-info` / `scripts` list name) is `title().lower()` and
+  is set only in `create_script_ui_inner` (`scripts.py:668`); `ScriptRunner.script(title)` uses `title_map` of lowercased
+  titles (`scripts.py:726-727, 979-980`).
+- **`Script.elem_id(item_id)`** = `script_{tab}_{title}_{item_id}` with `title` lowercased, whitespace to `_`, other
+  characters outside `[a-z_0-9]` dropped (`scripts.py:343-351`). Every elem_id built through it changes with the title
+  (custom CSS/JS, other extensions that look up ids; the extension's own JS if it uses them). The extension's own hand-written
+  elem_ids do not change.
+- **`ui-config.json` keys for script controls** use the file name, not the title: `customscript/<basename of script.filename>/<tab>/<label>/<field>`
+  (`scripts.py:673`, `ui_loadsave.py:45-46`). So saved control values survive a title change (they break only on a file rename).
+- **The "Script" dropdown** is `gr.Dropdown(label="Script", elem_id="script_list", choices=["None"] + titles, value="None",
+  type="index")` (`scripts.py:732`), choices are the titles. Its saved value is the title string at key `<tab>/Script/value` (no
+  `customscript/` prefix; the dropdown has no `custom_script_source`). After a rename the saved old title is not among the choices, so
+  `check_dropdown` ignores it (`ui_loadsave.py:112-121`, `67-68`): the dropdown starts at "None", and the old value stays in the file
+  (never rewritten). The user has to pick the script again once; the control values are kept.
+- **Infotext / paste:** the dropdown has an infotext field `Script` (`scripts.py:774`) and `onload_script_visibility` looks the
+  pasted `Script` value up in `self.titles`; an unknown title prints `Cannot find Script: "..."` and shows a `gr.Warning`
+  (`scripts.py:759-771`). So an old image whose parameters contain `Script: <old title>` no longer selects the script when pasted
+  (warning only, nothing breaks). Nothing in `modules/processing.py` writes a `Script:` key by itself (grep finds no `"Script"`
+  there); it appears only if the script adds it through `p.extra_generation_params`.
+- **Kept working after a rename:** control values in `ui-config.json`, the script's args order and count, the file name, API calls
+  that use the new name.
+
 ## Paths and working directory
 Base URL for sources: `https://raw.githubusercontent.com/Haoming02/sd-webui-forge-classic/neo/`.
 - **`models_path`** is defined in `modules/paths_internal.py` as
@@ -436,3 +523,7 @@ install's venv.
   calls it. A script that reads `p.seed` before `process_images` should call `processing.fix_seed(p)` itself (not confirmed as needed).
 - The handler of `{tab}_generation_info_button` is read (see "Results, infotexts and saving"), but the JS `selected_gallery_index()` was not.
 - Behaviour of the "Extras" postprocessing API (`scripts_postprocessing.ScriptPostprocessing`) in Neo — needed for the Extras idea.
+- Progress bar: the browser side (`javascript/progressbar.js`, how `textinfo` and the bar render, and when the bar is removed) was
+  not read; live check: a script that sets `job_count`, `job_no`, `textinfo` in a loop with `time.sleep`, watch the txt2img bar and
+  the Interrupt button. Whether the `/internal/progress` handler runs concurrently with generation (thread vs main-thread queue,
+  `modules_forge/main_thread.py`) was not read.

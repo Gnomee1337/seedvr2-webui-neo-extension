@@ -1,8 +1,9 @@
 import gc
+import math
 import os
 import sys
 from dataclasses import dataclass
-from typing import Any, Dict, List, Mapping, Optional, Union
+from typing import Any, Dict, List, Mapping, Optional, Tuple, Union
 
 import gradio as gr
 from modules import scripts, processing, images, shared, devices
@@ -21,11 +22,15 @@ EXTENSION_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if EXTENSION_ROOT not in sys.path:
     sys.path.insert(0, EXTENSION_ROOT)
 
+from seedvr2_neo.gpu_profiles import MANUAL, describe_profiles, find_profile, profile_choices
 from seedvr2_neo.loaded_models import LoadedModelTracker
 from seedvr2_neo.memory_plan import MAX_BLOCKS_TO_SWAP, AfterRun, build_memory_plan, is_7b_checkpoint, low_vram_warning, \
     parse_flag
 from seedvr2_neo.model_discovery import ModelScan, describe_missing_models, find_selection_error, scan_models
 from seedvr2_neo.model_lifecycle import ModelLifecycle
+from seedvr2_neo.pipeline_options import DEFAULT_ATTENTION_MODE, DEFAULT_COLOR_CORRECTION, ColorCorrection, \
+    PipelineOptions, choice_values, installed_attention_modes, parse_attention_mode, parse_color_correction, \
+    resolve_attention_mode
 from seedvr2_neo.run_inputs import is_unusable_seed, resolve_seed, select_distinct_images, select_generated_images, \
     to_pipeline_image
 from seedvr2_neo.run_results import InputDetails, RunImage, SavePlan, describe_generated_inputs, \
@@ -56,6 +61,13 @@ TXT2IMG_SOURCE_ORDER = ("width", "height", "enable_hr", "hr_scale", "hr_resize_x
 # whenever the input image changes size.
 TXT2IMG_SIZE_REFRESH_ID = "seedvr2_txt2img_size_refresh"
 IMG2IMG_SIZE_REFRESH_ID = "seedvr2_img2img_size_refresh"
+
+# The Script dropdown entry and the API's `script_name` (matched case-insensitively).
+SCRIPT_TITLE = "SeedVR2 Upscaler"
+
+# Forge's progress bar is `job_no / job_count` plus the current job's `sampling_step / sampling_steps`
+# (`modules/progress.py`); the run moves `sampling_step` through this many steps.
+PROGRESS_STEPS = 1000
 
 # Forge options the script reads itself (with the request's `override_settings`).
 SAMPLES_SAVE_OPTION = "samples_save"
@@ -105,7 +117,50 @@ def forge_hooks() -> HostHooks:
     """What the pipeline run takes from Forge, read at each run. Only Interrupt (`.interrupted`) stops a run; "Stop
     generating" (`.stopping_generation`) means "finish the current image", which should not abort the upscale."""
     return HostHooks(device=devices.device, release_memory=release_freed_memory,
-                     is_interrupted=lambda: shared.state.interrupted)
+                     is_interrupted=lambda: shared.state.interrupted, report_progress=report_forge_progress)
+
+
+def start_forge_progress() -> bool:
+    """Give the upscale a job of Forge's progress bar; True when the job counter is Forge's own. After txt2img's
+    `process_images` every job is done (the bar reads 100%), and a single img2img run has no job count yet, so the
+    upscale becomes the one job. In img2img Batch Forge counts `n_iter` jobs per file, and the counter stays Forge's:
+    only the steps of the current job move here, and `finish_forge_progress` moves past the file. `job_count` is never
+    raised above 1 here: Forge's Interrupt button behaves differently for several jobs."""
+    state = shared.state
+    job_count, job_no = read_state_count(state.job_count), read_state_count(state.job_no)
+    forge_counts_jobs = 0 <= job_no < job_count
+    if not forge_counts_jobs:
+        state.job_count, state.job_no = 1, 0
+    state.sampling_steps, state.sampling_step = PROGRESS_STEPS, 0
+    return forge_counts_jobs
+
+
+def finish_forge_progress(forge_counts_jobs: bool, iterations: Any) -> None:
+    """In img2img Batch, move Forge's job counter past this file: Forge leaves that to `process_images` (`nextjob()`
+    per iteration), which this script replaces in img2img, so without it every file would restart the same part of
+    the bar."""
+    if not forge_counts_jobs:
+        return
+    state = shared.state
+    job_count, job_no = read_state_count(state.job_count), read_state_count(state.job_no)
+    state.job_no = min(job_count, job_no + max(1, read_state_count(iterations)))
+    state.sampling_step = 0
+
+
+def read_state_count(value: Any) -> int:
+    """A job counter of `shared.state` (or `p.n_iter`) as an int; 0 when it is not a number."""
+    try:
+        return int(value)
+    except (TypeError, ValueError, OverflowError):
+        return 0
+
+
+def report_forge_progress(fraction: float, text: str) -> None:
+    """Move Forge's progress bar to `fraction` (0…1, clamped) of the current job and show `text` next to it; a
+    fraction that is not a number (NaN) leaves the bar where it is."""
+    if isinstance(fraction, (int, float)) and not math.isnan(fraction):
+        shared.state.sampling_step = int(round(min(max(fraction, 0.0), 1.0) * PROGRESS_STEPS))
+    shared.state.textinfo = text
 
 
 def get_total_vram_bytes() -> Optional[int]:
@@ -119,12 +174,40 @@ def get_total_vram_bytes() -> Optional[int]:
         return None
 
 
+def selected_is_7b(scan: ModelScan, dit_model_name: Optional[str]) -> Optional[bool]:
+    """Whether the selected DiT is 7B, or None when no listed DiT is selected."""
+    if not dit_model_name or scan.folder is None or dit_model_name not in scan.dit_models:
+        return None
+    return is_7b_checkpoint(dit_model_name, os.path.join(scan.folder, dit_model_name))
+
+
 def describe_vram_warning(scan: ModelScan, dit_model_name: Optional[str]) -> str:
     """The 7B-on-a-small-GPU note for the selected DiT, or an empty string."""
-    if not dit_model_name or scan.folder is None or dit_model_name not in scan.dit_models:
+    is_7b = selected_is_7b(scan, dit_model_name)
+    if is_7b is None:
         return ""
-    is_7b = is_7b_checkpoint(dit_model_name, os.path.join(scan.folder, dit_model_name))
     return low_vram_warning(is_7b, get_total_vram_bytes()) or ""
+
+
+def apply_gpu_profile(profile_label: Any, dit_model_name: Optional[str]) -> Tuple[Dict[str, Any], ...]:
+    """The memory sliders (BlockSwap, VAE tile size, tile overlap) for the chosen GPU profile and DiT; Manual and an
+    unknown profile leave them as they are."""
+    profile = find_profile(profile_label)
+    if profile is None:
+        return gr.update(), gr.update(), gr.update()
+    is_7b = bool(selected_is_7b(scan_seedvr2_models(), dit_model_name))
+    return (gr.update(value=profile.blocks_to_swap(is_7b)), gr.update(value=profile.tile_size),
+            gr.update(value=profile.tile_overlap))
+
+
+def resolve_pipeline_options(pipeline: Any, color_correction: Any, attention_mode: Any) -> PipelineOptions:
+    """The run's color correction and attention backend from raw UI / API values; a backend the pipeline could not
+    import falls back to `sdpa` with a console note."""
+    attention, note = resolve_attention_mode(parse_attention_mode(attention_mode),
+                                             getattr(pipeline, "attention_available", {}))
+    if note:
+        print(f"[SeedVR2] {note}")
+    return PipelineOptions(parse_color_correction(color_correction), attention)
 
 
 @dataclass(frozen=True)
@@ -179,7 +262,7 @@ class Script(scripts.Script):
         self._txt2img_size_sources: Dict[str, Any] = {}
 
     def title(self):
-        return "SeedVR2 Native Upscaler (24G)"
+        return SCRIPT_TITLE
 
     def show(self, is_img2img):
         return True
@@ -189,12 +272,14 @@ class Script(scripts.Script):
         # control, and run() gets the controls in the order of the list returned below, not in the order shown.
         dit_model, vae_model = self._model_controls()
         size_mode, resolution, scale_factor, long_edge = self._size_controls(is_img2img)
-        after_run, unload_sd, blocks_to_swap, swap_io_components = self._memory_controls()
+        after_run, unload_sd, gpu_profile, blocks_to_swap, swap_io_components = self._memory_controls()
         (seed, save_original, force_reload, debug_mode, input_noise, latent_noise, use_tile_vae, tile_size,
-         tile_overlap) = self._advanced_controls()
+         tile_overlap, color_correction, attention_mode) = self._advanced_controls()
+        self._connect_gpu_profile(gpu_profile, dit_model, [blocks_to_swap, tile_size, tile_overlap])
+        # The GPU profile is not returned: it only fills the sliders, so a run never depends on it
         return [dit_model, vae_model, seed, resolution, input_noise, latent_noise, force_reload, unload_sd, save_original,
                 use_tile_vae, tile_size, tile_overlap, debug_mode, after_run, blocks_to_swap, swap_io_components,
-                size_mode, scale_factor, long_edge]
+                size_mode, scale_factor, long_edge, color_correction, attention_mode]
 
     def _model_controls(self):
         """The DiT and VAE dropdowns with the rescan button and the notes under them."""
@@ -256,7 +341,8 @@ class Script(scripts.Script):
 
     @staticmethod
     def _memory_controls():
-        """After run and the SD unload, then BlockSwap: on the main screen, since 7B on a small GPU needs them."""
+        """After run and the SD unload, then the GPU profile and BlockSwap: on the main screen, since 7B on a small
+        GPU needs them."""
         with gr.Row():
             after_run = gr.Radio(label="After run", choices=[option.value for option in AfterRun],
                                  value=AfterRun.UNLOAD.value,
@@ -265,15 +351,21 @@ class Script(scripts.Script):
             unload_sd = gr.Checkbox(label="Unload SD Checkpoint", value=True, elem_classes="force-unload",
                                     info="Frees VRAM; the checkpoint reloads on the next generation")
         with gr.Row():
+            gpu_profile = gr.Dropdown(label="GPU Profile", choices=profile_choices(), value=MANUAL,
+                                      info=describe_profiles())
+            # Always starts at Manual: a profile saved in ui-config.json would be shown next to slider values the
+            # user changed afterwards.
+            gpu_profile.do_not_save_to_config = True
             blocks_to_swap = gr.Slider(label="BlockSwap: DiT blocks kept in RAM", minimum=0,
                                        maximum=MAX_BLOCKS_TO_SWAP, step=1, value=0)
             swap_io_components = gr.Checkbox(label="BlockSwap: I/O layers too", value=False,
                                              info="Turns BlockSwap on even with 0 blocks; saves little VRAM")
-        return after_run, unload_sd, blocks_to_swap, swap_io_components
+        return after_run, unload_sd, gpu_profile, blocks_to_swap, swap_io_components
 
     @staticmethod
     def _advanced_controls():
-        """The settings changed rarely: seed, extra saving, reload and logs, noise, VAE tiling."""
+        """The settings changed rarely: seed, extra saving, reload and logs, noise, VAE tiling, color correction and
+        attention."""
         with gr.Accordion("Advanced Settings", open=False):
             with gr.Row():
                 seed = gr.Number(label="Seed (-1 = Random/Follow)", value=-1, precision=0)
@@ -295,8 +387,27 @@ class Script(scripts.Script):
                 tile_size = gr.Slider(label="VAE Tile Size", **slider_range(TILE_SIZE))
                 tile_overlap = gr.Slider(label="Tile Overlap", info="At most half the VAE Tile Size is used",
                                          **slider_range(TILE_OVERLAP))
+            with gr.Row():
+                color_correction = gr.Dropdown(label="Color Correction", choices=choice_values(ColorCorrection),
+                                               value=DEFAULT_COLOR_CORRECTION.value,
+                                               info="Matches the result's colors to the input; lab keeps them closest")
+                attention_mode = gr.Dropdown(label="Attention", choices=choice_values(installed_attention_modes()),
+                                             value=DEFAULT_ATTENTION_MODE.value,
+                                             info="sdpa is built into PyTorch; others appear when their package is "
+                                                  "installed")
         return (seed, save_original, force_reload, debug_mode, input_noise, latent_noise, use_tile_vae, tile_size,
-                tile_overlap)
+                tile_overlap, color_correction, attention_mode)
+
+    @staticmethod
+    def _connect_gpu_profile(gpu_profile, dit_model, sliders) -> None:
+        """A chosen profile fills `sliders` (BlockSwap, VAE tile size, tile overlap), again when the DiT changes
+        between 3B and 7B; moving one of them by hand sets the profile back to Manual. `.input` fires only for the
+        user's own changes, not for the profile's."""
+        event = dict(fn=apply_gpu_profile, inputs=[gpu_profile, dit_model], outputs=sliders, show_progress="hidden")
+        gpu_profile.change(**event)
+        dit_model.change(**event)
+        for slider in sliders:
+            slider.input(fn=lambda: MANUAL, inputs=[], outputs=[gpu_profile], show_progress="hidden")
 
     def after_component(self, component, **kwargs):
         """Keep the txt2img controls the output size preview reads; Forge calls this for every component it builds,
@@ -364,8 +475,9 @@ class Script(scripts.Script):
     def run(self, p, dit_model_name, vae_model_name, seed, resolution, input_noise, latent_noise, force_reload, unload_sd,
             save_original, use_tile_vae, tile_size, tile_overlap, debug_mode, after_run=AfterRun.UNLOAD.value,
             blocks_to_swap=0, swap_io_components=False, size_mode=FALLBACK_SIZE_MODE.value,
-            scale_factor=SCALE_FACTOR.default, long_edge=LONG_EDGE.default):
-        # An API caller may send fewer values than there are controls (older callers send 13 or 16). Forge does not
+            scale_factor=SCALE_FACTOR.default, long_edge=LONG_EDGE.default,
+            color_correction=DEFAULT_COLOR_CORRECTION.value, attention_mode=DEFAULT_ATTENTION_MODE.value):
+        # An API caller may send fewer values than there are controls (older callers send 13, 16 or 19). Forge does not
         # pad the list with the UI's values: these defaults, or whatever Forge shifts into the missing positions, are
         # read leniently, and an unreadable size mode means the shortest edge, the only mode older callers know.
         # Checked before the base image is generated, so a bad selection costs no generation time
@@ -386,6 +498,7 @@ class Script(scripts.Script):
         settings = parse_upscale_settings(resolution, input_noise, latent_noise, use_tile_vae, tile_size, tile_overlap,
                                           size_mode, scale_factor, long_edge)
         memory_plan = build_memory_plan(after_run, blocks_to_swap, swap_io_components)
+        options = resolve_pipeline_options(pipeline, color_correction, attention_mode)
 
         is_txt2img = isinstance(p, StableDiffusionProcessingTxt2Img)
         collected = self._collect_inputs(p, is_txt2img, seed, debug_mode)
@@ -406,11 +519,14 @@ class Script(scripts.Script):
             devices.torch_gc()
 
         request = UpscaleRequest(dit_model=dit_model_name, vae_model=vae_model_name, model_dir=scan.folder,
-                                 memory_plan=memory_plan, seed=collected.seed, settings=settings)
+                                 memory_plan=memory_plan, seed=collected.seed, settings=settings, options=options)
+        forge_counts_jobs = start_forge_progress()
         outcome = UpscaleRun(pipeline, MODEL_LIFECYCLE, forge_hooks()).upscale_images(collected.images, request,
                                                                                        force_reload, debug_mode)
+        finish_forge_progress(forge_counts_jobs, getattr(p, "n_iter", 1))
 
-        params = [seedvr2_generation_params(dit_model_name, vae_model_name, settings, image.size, collected.seed)
+        params = [seedvr2_generation_params(dit_model_name, vae_model_name, settings, image.size, collected.seed,
+                                            options)
                   for image in collected.images]
         return build_result(p, merge_run_images(collected.images, outcome.upscaled), collected.details, params,
                             outcome.failure, collected.result_seed, save_plan)

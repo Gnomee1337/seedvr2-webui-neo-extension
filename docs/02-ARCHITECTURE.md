@@ -54,7 +54,7 @@ The source of truth is the code; this document is reconciled with it on every `/
 | Hook | Caller | Module | What it does |
 |---|---|---|---|
 | `install.py` (run as a script) | Forge launcher, every start | `install.py` | `pip install rotary-embedding-torch` if missing |
-| `Script.title / show / ui` | Forge, when building the txt2img and img2img tabs | `scripts/seedvr2_script.py` | Adds "SeedVR2 Native Upscaler (24G)" to the Script dropdown; scans the model folder for the DiT/VAE dropdowns, 🔄 rescans it |
+| `Script.title / show / ui` | Forge, when building the txt2img and img2img tabs | `scripts/seedvr2_script.py` | Adds "SeedVR2 Upscaler" to the Script dropdown; scans the model folder for the DiT/VAE dropdowns, 🔄 rescans it |
 | `Script.run(p, *args)` | Forge, when Generate is pressed with this script selected | `scripts/seedvr2_script.py` | txt2img: generate then upscale; img2img: upscale the input image. Returns `Processed` |
 
 ### Pages and API for people
@@ -66,9 +66,11 @@ None of its own: the UI lives inside the txt2img / img2img tabs.
 - `seedvr2_script.py` — the Forge side: UI controls, the model refresh button and the 7B low-VRAM note, the model
   check and pipeline import before a run, collecting the images to upscale (txt2img base images / img2img inputs),
   the SD unload, the process-wide `MODEL_LIFECYCLE`, Forge's hooks for the run (`forge_hooks`: device, memory release,
-  `shared.state.interrupted`), saving (`-seedvr2`, `-original`) and Forge's `Processed`. `ui()` builds four sections
-  (`_model_controls`, `_size_controls`, `_memory_controls`, `_advanced_controls`) and returns the controls in `run()`'s
-  order. The output size preview: `after_component` keeps Forge's txt2img width / height / Hires. fix controls (by
+  `shared.state.interrupted`, the progress bar through `start_forge_progress` / `report_forge_progress`), the run's
+  color correction and attention (`resolve_pipeline_options`), saving (`-seedvr2`, `-original`) and Forge's
+  `Processed`. `ui()` builds four sections (`_model_controls`, `_size_controls`, `_memory_controls`,
+  `_advanced_controls`) and returns the controls in `run()`'s order; the GPU profile dropdown is not among them, it
+  fills the memory sliders through `apply_gpu_profile` (`_connect_gpu_profile`). The output size preview: `after_component` keeps Forge's txt2img width / height / Hires. fix controls (by
   `elem_id`), whose changes update the size line; in img2img the browser reads the image size.
 
 ### javascript/, style.css
@@ -86,6 +88,13 @@ No Forge or Gradio imports; torch only in `upscale_run.py`. Tested outside Forge
   DiT/VAE offload devices, `block_swap_config()`); `AfterRun` (UI labels); `is_7b_checkpoint` (through the vendored
   `utils/dit_size.py`, header only); `low_vram_warning(is_7b, total_vram_bytes)`.
 - `loaded_models.py` — `ModelFileIdentity` (path, size, mtime) and `LoadedModelTracker`: which files the cached models came from.
+- `gpu_profiles.py` — `GpuProfile` and `GPU_PROFILES` (8 / 12 / 24 GB: VAE tile size and overlap, BlockSwap for 3B
+  and 7B, measured or not), `MANUAL`, `profile_choices`, `find_profile`, `describe_profiles`.
+- `pipeline_options.py` — `ColorCorrection`, `AttentionMode`, `PipelineOptions` (defaults LAB, `sdpa`);
+  `parse_color_correction` / `parse_attention_mode`; `installed_attention_modes` (the UI's list, by installed package,
+  no import); `resolve_attention_mode` (the run's backend from the vendored import flags, `sdpa` with a note otherwise).
+- `run_progress.py` — `RunProgress`: the share of a run done (passes by their images, the four `PHASES` by weight,
+  batches from the pipeline's callback, DiT blocks inside the DiT phase) and a text, sent to a report function.
 - `model_lifecycle.py` — `ModelLifecycle`: drops the vendored cache before a run (Force Reload, other files) and after it
   (Unload, error, interrupt), then releases memory through a function the script passes in.
 - `run_inputs.py` (Pillow, numpy) — `select_generated_images` (skip the grid and extras), `select_distinct_images`
@@ -105,10 +114,14 @@ No Forge or Gradio imports; torch only in `upscale_run.py`. Tested outside Forge
   built by `describe_generated_inputs` / `describe_uploaded_inputs`; `finish_images` → `ResultImage` list (infotext per
   image, copies of returned inputs keeping `already_saved_as`, infotext embedded in `image.info`) and
   `not_upscaled_comment`.
-- `upscale_run.py` (torch, torchvision) — `import_pipeline` (the vendored modules, imported at run time), `UpscaleRequest`,
-  `HostHooks` (device, memory release, interrupt flag from the host), `UpscaleRun.upscale_images` → `UpscaleOutcome`
-  (upscaled images by input index, failure text): an `OutputTarget` per input size, passes, the four phases with fresh context, memory release after each
-  phase, interrupt via the progress callback, errors reduced to their type; `images_to_tensor` / `tensor_to_images`.
+- `upscale_run.py` (torch, torchvision) — `import_pipeline` (the vendored modules, imported at run time, and
+  `attention_availability` from the vendored import flags), `UpscaleRequest` (with `PipelineOptions`), `HostHooks`
+  (device, memory release, interrupt flag and progress report from the host), `UpscaleRun.upscale_images` →
+  `UpscaleOutcome` (upscaled images by input index, failure text): an `OutputTarget` per input size, passes, the four
+  phases with fresh context, memory release after each phase, errors reduced to their type. Interrupt and progress:
+  the pipeline's progress callback and `ctx['interrupt_fn']` between batches, and forward pre-hooks on the container
+  modules of the VAE and the DiT (`watching_modules`, `container_modules`, `dit_block_types`) inside a batch;
+  `images_to_tensor` / `tensor_to_images`.
 
 ### seedvr2_vendor/core/
 - `generation_utils.py` — `setup_generation_context` (devices, dtype), `prepare_runner`, `compute_generation_info`, `load_text_embeddings`.

@@ -45,8 +45,16 @@ Terms in plain words. A new term comes up in conversation — add it here right 
   or freed completely (default).
 - **Offload** — moving a model or tensors to the CPU when not in use.
 - **Input / latent noise scale** — noise added to the input image / to the latent before upscaling; more noise — more invented detail.
-- **LAB color correction** — matching the colors of the result to the input in LAB color space, to avoid color shift.
+- **Color correction** — matching the colors of the result to the input after the upscale, to avoid color shift.
+  Methods: `lab` (in LAB color space, the default and closest), `wavelet` / `wavelet_adaptive` (low frequencies of the
+  input, details of the result), `hsv`, `adain` (mean and spread of each channel), `none`.
 - **Text embeddings (`pos_emb.pt`, `neg_emb.pt`)** — precomputed prompt vectors; SeedVR2 takes no user prompt.
 - **sdpa** — PyTorch's built-in scaled dot-product attention; the default attention backend.
+- **Attention backend** — the code that computes the DiT's attention: `sdpa`, or FlashAttention / SageAttention when
+  their packages are installed (faster on supported GPUs, same model).
+- **GPU profile** — a preset that fills BlockSwap and the VAE tile size for an 8, 12 or 24 GB GPU; the sliders stay editable.
+- **Forward pre-hook** — a function PyTorch calls before a module (a layer or a block of layers) runs; here it checks
+  Interrupt and moves the progress bar inside a long phase.
+- **Container module** — a module that holds other modules (a DiT block, a VAE stage), as opposed to a single layer.
 - **Output size mode** — how the result size is chosen: Scale factor (×1–×4 of each image, the UI default ×2), Shortest edge (one shortest side in px for every image, the API default) or Long edge (the longest side in px).
 - **Size line** — the line under the size controls naming the final output size before Generate; computed with the same rules as the run.
