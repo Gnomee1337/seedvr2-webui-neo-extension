@@ -2,7 +2,7 @@
 
 ## Where we stopped
 
-**B08 closed** on `feature/b08-settings-feedback`; merging into `main` waits for the owner's consent (CI first).
+**B08 closed** and merged into `main` with the owner's consent (CI green).
 
 What B08 changes for users: Forge's progress bar follows the upscale (phases, DiT blocks; in img2img Batch the
 counter moves past each file); Interrupt stops a run within seconds even inside the DiT step or the tiled VAE decode
@@ -32,8 +32,7 @@ requirements-dev.txt python -m pytest tests -q` (pulls CPU torch on Windows). CI
 
 ## Next steps
 
-1. Owner: consent to merge `feature/b08-settings-feedback` into `main` (users get it on "Check for updates").
-2. B12 — DiT tiling with feather blending (4K+ on 8 GB), then 6K/8K options. Weight 5: plan on a strong model.
+1. B12 — DiT tiling with feather blending (4K+ on 8 GB), then 6K/8K options. Weight 5: plan on a strong model.
 
 Agreed with the owner: REQ-1…REQ-6, simplified Git Flow, ComfyUI files kept as in upstream (Forge Neo only),
 hardware target — 8 GB GPU without bf16, the whole repository under Apache-2.0, no grid of upscaled images, the UI
@@ -42,4 +41,4 @@ The fork is public: `main` is what users get, pushes only with consent.
 
 ## Open questions for the owner
 
-- Merge B08 into `main`?
+None.
