@@ -1,8 +1,9 @@
 import gc
+import math
 import os
 import sys
 from dataclasses import dataclass
-from typing import Any, Dict, List, Mapping, Optional, Union
+from typing import Any, Dict, List, Mapping, Optional, Tuple, Union
 
 import gradio as gr
 from modules import scripts, processing, images, shared, devices
@@ -119,21 +120,46 @@ def forge_hooks() -> HostHooks:
                      is_interrupted=lambda: shared.state.interrupted, report_progress=report_forge_progress)
 
 
-def start_forge_progress() -> None:
-    """Give the upscale a job of Forge's progress bar. After txt2img's `process_images` every job is done (the bar
-    reads 100%), and a single img2img run has no job count yet, so the upscale becomes the one job. When Forge is
-    inside a job of its own (img2img Batch: one job per file), the job counter stays Forge's, and only the steps of
-    the current job move. `job_count` is never raised above 1 here: Forge's Interrupt button behaves differently for
-    several jobs."""
+def start_forge_progress() -> bool:
+    """Give the upscale a job of Forge's progress bar; True when the job counter is Forge's own. After txt2img's
+    `process_images` every job is done (the bar reads 100%), and a single img2img run has no job count yet, so the
+    upscale becomes the one job. In img2img Batch Forge counts `n_iter` jobs per file, and the counter stays Forge's:
+    only the steps of the current job move here, and `finish_forge_progress` moves past the file. `job_count` is never
+    raised above 1 here: Forge's Interrupt button behaves differently for several jobs."""
     state = shared.state
-    if state.job_count <= 0 or state.job_no >= state.job_count:
+    job_count, job_no = read_state_count(state.job_count), read_state_count(state.job_no)
+    forge_counts_jobs = 0 <= job_no < job_count
+    if not forge_counts_jobs:
         state.job_count, state.job_no = 1, 0
     state.sampling_steps, state.sampling_step = PROGRESS_STEPS, 0
+    return forge_counts_jobs
+
+
+def finish_forge_progress(forge_counts_jobs: bool, iterations: Any) -> None:
+    """In img2img Batch, move Forge's job counter past this file: Forge leaves that to `process_images` (`nextjob()`
+    per iteration), which this script replaces in img2img, so without it every file would restart the same part of
+    the bar."""
+    if not forge_counts_jobs:
+        return
+    state = shared.state
+    job_count, job_no = read_state_count(state.job_count), read_state_count(state.job_no)
+    state.job_no = min(job_count, job_no + max(1, read_state_count(iterations)))
+    state.sampling_step = 0
+
+
+def read_state_count(value: Any) -> int:
+    """A job counter of `shared.state` (or `p.n_iter`) as an int; 0 when it is not a number."""
+    try:
+        return int(value)
+    except (TypeError, ValueError, OverflowError):
+        return 0
 
 
 def report_forge_progress(fraction: float, text: str) -> None:
-    """Move Forge's progress bar to `fraction` (0…1) of the current job and show `text` next to it."""
-    shared.state.sampling_step = int(round(min(max(fraction, 0.0), 1.0) * PROGRESS_STEPS))
+    """Move Forge's progress bar to `fraction` (0…1, clamped) of the current job and show `text` next to it; a
+    fraction that is not a number (NaN) leaves the bar where it is."""
+    if isinstance(fraction, (int, float)) and not math.isnan(fraction):
+        shared.state.sampling_step = int(round(min(max(fraction, 0.0), 1.0) * PROGRESS_STEPS))
     shared.state.textinfo = text
 
 
@@ -163,7 +189,7 @@ def describe_vram_warning(scan: ModelScan, dit_model_name: Optional[str]) -> str
     return low_vram_warning(is_7b, get_total_vram_bytes()) or ""
 
 
-def apply_gpu_profile(profile_label, dit_model_name):
+def apply_gpu_profile(profile_label: Any, dit_model_name: Optional[str]) -> Tuple[Dict[str, Any], ...]:
     """The memory sliders (BlockSwap, VAE tile size, tile overlap) for the chosen GPU profile and DiT; Manual and an
     unknown profile leave them as they are."""
     profile = find_profile(profile_label)
@@ -174,7 +200,7 @@ def apply_gpu_profile(profile_label, dit_model_name):
             gr.update(value=profile.tile_overlap))
 
 
-def resolve_pipeline_options(pipeline, color_correction, attention_mode) -> PipelineOptions:
+def resolve_pipeline_options(pipeline: Any, color_correction: Any, attention_mode: Any) -> PipelineOptions:
     """The run's color correction and attention backend from raw UI / API values; a backend the pipeline could not
     import falls back to `sdpa` with a console note."""
     attention, note = resolve_attention_mode(parse_attention_mode(attention_mode),
@@ -494,9 +520,10 @@ class Script(scripts.Script):
 
         request = UpscaleRequest(dit_model=dit_model_name, vae_model=vae_model_name, model_dir=scan.folder,
                                  memory_plan=memory_plan, seed=collected.seed, settings=settings, options=options)
-        start_forge_progress()
+        forge_counts_jobs = start_forge_progress()
         outcome = UpscaleRun(pipeline, MODEL_LIFECYCLE, forge_hooks()).upscale_images(collected.images, request,
                                                                                        force_reload, debug_mode)
+        finish_forge_progress(forge_counts_jobs, getattr(p, "n_iter", 1))
 
         params = [seedvr2_generation_params(dit_model_name, vae_model_name, settings, image.size, collected.seed,
                                             options)

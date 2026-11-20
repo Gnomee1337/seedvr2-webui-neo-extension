@@ -20,8 +20,7 @@ port [numz/ComfyUI-SeedVR2_VideoUpscaler](https://github.com/numz/ComfyUI-SeedVR
    stops with "local changes would be overwritten" (old versions kept compiled `.pyc` files in git), run
    `git reset --hard origin/main` in the extension folder; it discards local edits to the extension's files.
 
-Install only one SeedVR2 extension for Forge. The original one shows the same name in the **Script** list, and each
-keeps its own copy of the models in memory.
+Install only one SeedVR2 extension for Forge: each keeps its own copy of the models in memory.
 
 ## Models
 
@@ -68,7 +67,8 @@ console also prints it per group of same-sized images, e.g. `[SeedVR2] 2 images 
 
 While the upscale runs, Forge's progress bar shows its phase (Encoding, Upscaling, Decoding, Post-processing) and
 moves inside the long DiT step too. **Interrupt** stops the upscale within a few seconds, even in the middle of the DiT
-step or of the VAE decoding; **Skip** and "Stop generating" let it finish.
+step or of the VAE decoding (the console may show an `Error in Phase …` line from the pipeline right before
+"Process Interrupted by User": that is the interrupt, not a crash); **Skip** and "Stop generating" let it finish.
 
 Each result keeps its generation parameters plus `SeedVR2 …` keys (model, VAE, the shortest edge it was upscaled to,
 seed, size mode with its factor or long edge, color correction, attention). Files are written
@@ -87,7 +87,8 @@ means fewer tiles and a faster VAE).
 **Color Correction** (Advanced Settings) matches the result's colors to the input: `lab` (default, the closest),
 `wavelet`, `wavelet_adaptive`, `hsv`, `adain`, or `none` for the model's own colors. **Attention** is `sdpa` (built into
 PyTorch); `flash_attn_2` / `flash_attn_3` / `sageattn_2` / `sageattn_3` appear when their package is installed in
-Forge's Python, and a run falls back to `sdpa` (with a console note) when the package fails to load.
+Forge's Python. When the chosen one fails to load, a run uses version 2 of the same backend if that loaded, else
+`sdpa`, with a console note; the image parameters name the backend actually used.
 
 **GPU Profile** (next to BlockSwap) fills BlockSwap and the VAE tile size for an 8, 12 or 24 GB GPU and for the selected
 DiT (3B or 7B); the sliders stay as you can see them and can be changed afterwards (the profile then shows *Manual*).

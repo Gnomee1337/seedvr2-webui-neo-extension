@@ -111,20 +111,32 @@ Live-checked on an 8 GB GPU without bf16, 16 GB RAM, 1080px output, VAE tile 512
 - 🟡 R6 (S2×L3) **With `--cuda-malloc` a batch multiplies the VAE-decode spill** (section 3): live, 3B GGUF, 4 × 512→1024 px,
   tile 512 on an 8 GB GPU — each frame decoded in 90–160 s with VRAM full (vs ~10 s without the flag); the run took
   ~12 min. Not caused by batching, but users with batches feel it most.
-- 🟡 R4 (S2×L2) **A 4K output takes many minutes on an 8 GB GPU.** Live, 3B GGUF, tile 512: one 16:9 image to
-  3840×2160 — ~8 min without `--cuda-malloc`, ~17.5 min with it (DiT step 5.7 / 10.5 min, VRAM full, no OOM, clean
-  image). Faster only with DiT tiling (roadmap).
 - 🟡 R6 (S2×L3) **The default ×2 makes UI runs much bigger than before.** The UI starts in Scale factor ×2 (owner's
   choice): SDXL 1024² → 2048² (4.2 MP, ~3.5× the old 1080 px default); with Hires. fix ×1.5 first → 3072² (9.4 MP,
   more than the 4K case above). The size line under the controls shows it before Generate; README says so. A user who
   prefers the shortest edge picks it again each session (the mode is not saved).
+- 🟡 R4 (S2×L2) **A 4K output takes many minutes on an 8 GB GPU.** Live, 3B GGUF, tile 512: one 16:9 image to
+  3840×2160 — ~8 min without `--cuda-malloc`, ~17.5 min with it (DiT step 5.7 / 10.5 min, VRAM full, no OOM, clean
+  image). Faster only with DiT tiling (roadmap).
 - 🟡 R4 (S2×L2) **A pass may still need a few GB of RAM.** Passes are capped at 16 MP of output (`PASS_BUDGET_PIXELS`
   in `seedvr2_neo/run_inputs.py`), but the pipeline keeps its own copies (latents, decoded frames, alpha) per pass;
   peak RAM per pass is not measured. Huge inputs (a decompression bomb through the API) are decoded by Forge before
   `run()`; whether Neo keeps Pillow's `MAX_IMAGE_PIXELS` limit is not verified.
+- 🟡 R4 (S2×L2) **API calls with the old `script_name` "SeedVR2 Native Upscaler (24G)" fail with HTTP 422** since the
+  title became "SeedVR2 Upscaler" (Forge has no title alias). README names the new title; the UI's Script dropdown
+  starts at None once after the update.
 - 🟢 R3 (S1×L3) **An interrupt or an error loses the whole pass in progress.** Its images come back un-upscaled (as
   inputs with `SeedVR2 Error` and a result comment); only earlier passes survive. Finished passes are saved even after
   an interrupt, like Forge's earlier batches.
+- 🟢 R3 (S1×L3) **The progress bar stands still during a VAE phase of one image** (the VAE reports nothing per tile)
+  and the phase weights are rough shares of a run on 8 GB, so Forge's ETA is approximate; with `--cuda-malloc` the
+  decode takes far longer than its weight. The DiT phase moves per block. In txt2img the bar drops from 100% to 0
+  when the upscale starts, so the ETA jumps once. In img2img Batch with Batch count > 1 a file's upscale moves only
+  its first job's share, then the counter skips the file's other jobs. After "Stop generating" in the middle of a
+  txt2img batch the upscale counts as Forge's unfinished job (the bar is offset, nothing else).
+- 🟢 R3 (S1×L3) **Interrupt prints an ERROR line before "Process Interrupted by User"**: the vendored phases log
+  `Error in Phase N` for any exception before re-raising it (`generation_phases.py`), and Interrupt now stops runs
+  inside phases. The result is correct (inputs back with `SeedVR2 Error: Interrupted`). README says so.
 - 🟢 R2 (S1×L2) **Each extra pass reloads the models in "Unload" mode** (different sizes, or more than 16 MP of
   output). "Keep in RAM" reuses them.
 - 🟢 R2 (S1×L2) **A batched image is not reproduced exactly from its "SeedVR2 Seed".** The VAE encode draws its sample
@@ -151,6 +163,19 @@ Live-checked on an 8 GB GPU without bf16, 16 GB RAM, 1080px output, VAE tile 512
   The line assumes the current Hires. fix behaviour (not `use_old_hires_fix_width_height`) and reads `res_step` live,
   while Forge's rounding uses the value read at start (the option needs a restart): off by one step until then. The
   img2img size comes from `naturalWidth`, falling back to the rendered width (as Neo's own preview), not checked live.
+- 🟢 R2 (S1×L2) **The 12 and 24 GB GPU profiles are not measured** (tile 768 / 1024, 7B BlockSwap 8 / 0). The UI says
+  so; a profile only fills sliders. Its 7B BlockSwap values are for 7B fp8 (7B fp16 needs more blocks); it does not
+  turn "Enable VAE Tiling" back on; the tile sliders it changes are inside the closed "Advanced Settings".
+- 🟢 R2 (S2×L1) **An attention backend that imports can still fail on the GPU** (FlashAttention 2 needs Ampere or
+  newer; the 8 GB target class is Turing): the run ends with `Runtime Error: <type>` in the infotext and the
+  details in the console. The list shows installed packages, not what the GPU supports.
+- 🟢 R2 (S1×L2) **Interrupt in img2img Batch can be a soft stop:** with Forge's "interrupt after current" option and
+  several files (`job_count > 1`, Forge's own counter) the first click finishes the current file.
+- 🟢 R2 (S1×L2) **Interrupt and progress inside a phase depend on the vendored model structure:** `runner.dit` (or its
+  `dit_model`) with `blocks`, `runner.vae`, and loaders that keep module objects (`load_state_dict(assign=True)`;
+  GGUF swaps only Linear layers). An upstream sync that rebuilds modules at load time leaves Interrupt between batches
+  only and the DiT phase without per-block progress, with no error. Check live after an upstream sync: Interrupt
+  during the DiT step stops the run within seconds.
 - 🟢 R1 (S1×L1) **An image thinner than about 1920:1 cannot be upscaled in Scale factor / Long edge** (about 2×
   resolution : 1 in Shortest edge): the capped short side is under 2 px, the pipeline fails on it and the image comes
   back with `SeedVR2 Error` (other sizes in the run are unaffected). The size line says "too thin to upscale".
@@ -160,19 +185,6 @@ Live-checked on an 8 GB GPU without bf16, 16 GB RAM, 1080px output, VAE tile 512
   `Processed` (and its comments) of the first file only; each image's infotext still has `SeedVR2 Error`.
 - 🟢 R1 (S1×L1) **A 16-bit grayscale PNG loses its transparency key** (it is scaled correctly, but comes back opaque).
   Repro: `test_16_bit_png_with_transparency_is_scaled_and_keeps_alpha` (strict xfail).
-- 🟡 R4 (S2×L2) **API calls with the old `script_name` "SeedVR2 Native Upscaler (24G)" fail with HTTP 422** since the
-  title became "SeedVR2 Upscaler" (Forge has no title alias). README names the new title; the UI's Script dropdown
-  starts at None once after the update.
-- 🟢 R3 (S1×L3) **The progress bar stands still during a VAE phase of one image** (the VAE reports nothing per tile)
-  and the phase weights are rough shares of a run on 8 GB, so Forge's ETA is approximate; with `--cuda-malloc` the
-  decode takes far longer than its weight. The DiT phase moves per block.
-- 🟢 R2 (S1×L2) **The 12 and 24 GB GPU profiles are not measured** (tile 768 / 1024, 7B BlockSwap 8 / 0). The UI says
-  so; a profile only fills sliders the user sees.
-- 🟢 R2 (S1×L2) **Interrupt and progress inside a phase depend on the vendored model structure:** `runner.dit` (or its
-  `dit_model`) with `blocks`, `runner.vae`, and loaders that keep module objects (`load_state_dict(assign=True)`;
-  GGUF swaps only Linear layers). An upstream sync that rebuilds modules at load time leaves Interrupt between batches
-  only and the DiT phase without per-block progress, with no error. Check live after an upstream sync: Interrupt
-  during the DiT step stops the run within seconds.
 
 ## 5. Code hygiene
 - 🟢 R3 (S3×L1) **"Reload UI" after a manual `git pull` can drop the script until a restart.** Reload keeps the old
@@ -203,6 +215,8 @@ Live-checked on an 8 GB GPU without bf16, 16 GB RAM, 1080px output, VAE tile 512
   another extension's real `src` package. Users may delete it by hand.
 - 🟢 R2 (S1×L2) **Manual `git pull` can stop on the removed `.pyc` files** that Python rewrote locally. Forge's own update
   is not affected (`external-apis/forge-neo.md`); the README gives `git reset --hard origin/main`.
+- 🟢 R1 (S2×L1) **A shifted positional API value can turn color correction off:** with another selectable script's
+  arguments shifted into ours, a string "None" reads as color correction `none` (choices ignore case).
 - 🟢 R2 (S1×L2) **An API call with a short `script_args` fails with HTTP 500.** Forge replaces the script's slice with
   the list sent instead of padding it with defaults, so `run()` misses required parameters (`external-apis/forge-neo.md`).
   API callers have to send all arguments; the error is immediate and nothing runs. Close: defaults for `run()`'s trailing

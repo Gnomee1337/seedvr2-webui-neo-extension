@@ -43,13 +43,31 @@ def test_a_single_img2img_run_gets_a_job_of_its_own(script, forge, pipeline):
     assert forge.state.progress_fraction() == pytest.approx(1.0)
 
 
-def test_img2img_batch_keeps_forge_s_job_counter(script, forge, pipeline):
-    """In img2img Batch Forge counts the files as jobs; the upscale moves only the current file's share."""
-    forge.state.job_count, forge.state.job_no = 3, 1
+def test_img2img_batch_keeps_forge_s_job_counter_and_moves_past_each_file(script, forge, pipeline):
+    """In img2img Batch Forge sets `job_count` to files × n_iter once and leaves `job_no` to `process_images`, which
+    the script replaces (`modules/img2img.py`): the upscale moves the current file's share, then past the file."""
+    forge.state.job_count, forge.state.job_no = 3, 0  # what Forge sets before the first of three files
+    for file_number in range(3):
+        pipeline.progress_seen.clear()
+        script.run(make_img2img([Image.new("RGB", (8, 8))]), **run_args())
+        assert all(file_number / 3 <= fraction <= (file_number + 1) / 3 for fraction in pipeline.progress_seen)
+        assert (forge.state.job_count, forge.state.job_no) == (3, file_number + 1)
+    assert forge.state.progress_fraction() == pytest.approx(1.0)
+
+
+def test_img2img_batch_with_several_iterations_moves_past_all_of_them(script, forge, pipeline):
+    """Forge counts `n_iter` jobs per file; the script upscales the file once and moves past all of its jobs."""
+    forge.state.job_count, forge.state.job_no = 4, 0  # two files, n_iter 2
+    script.run(make_img2img([Image.new("RGB", (8, 8))], n_iter=2), **run_args())
+    assert forge.state.job_no == 2
+
+
+@pytest.mark.parametrize("job_count, job_no", [(None, None), ("x", "3"), (2, 5), (0, 0), (-1, 0)])
+def test_odd_job_counters_make_the_upscale_its_own_job(script, forge, pipeline, job_count, job_no):
+    forge.state.job_count, forge.state.job_no = job_count, job_no
     script.run(make_img2img([Image.new("RGB", (8, 8))]), **run_args())
-    assert (forge.state.job_count, forge.state.job_no) == (3, 1)
-    assert all(1 / 3 <= fraction <= 2 / 3 for fraction in pipeline.progress_seen)
-    assert forge.state.progress_fraction() == pytest.approx(2 / 3)
+    assert (forge.state.job_count, forge.state.job_no) == (1, 0)
+    assert forge.state.progress_fraction() == pytest.approx(1.0)
 
 
 def test_several_passes_move_the_bar_forward_only(script, forge, pipeline):

@@ -181,3 +181,11 @@ def test_degenerate_sizes_do_not_crash(size):
     for settings in (parse(), factor(4), long_edge(3840)):
         width, height = settings.target_for(size).output_size(size)
         assert width >= 0 and height >= 0
+
+
+def test_one_choice_parser_reads_any_string_enum_ignoring_case_and_spaces():
+    from seedvr2_neo.pipeline_options import ColorCorrection
+    assert us.parse_choice("  WAVELET ", ColorCorrection, ColorCorrection.LAB) is ColorCorrection.WAVELET
+    assert us.parse_choice(" long EDGE", us.SizeMode, us.SizeMode.SHORTEST_EDGE) is us.SizeMode.LONG_EDGE
+    assert us.parse_choice(us.SizeMode.LONG_EDGE, ColorCorrection, ColorCorrection.LAB) is ColorCorrection.LAB
+    assert us.parse_choice(b"lab", ColorCorrection, ColorCorrection.NONE) is ColorCorrection.NONE

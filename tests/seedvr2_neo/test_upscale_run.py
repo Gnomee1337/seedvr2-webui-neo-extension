@@ -1,5 +1,7 @@
 """Running the pipeline over images — `seedvr2_neo/upscale_run.py`. The whole run through the Forge script is covered in
 `tests/scripts/test_seedvr2_script.py`; here are the parts that script tests cannot reach directly."""
+import gc
+import weakref
 from dataclasses import replace
 from types import SimpleNamespace
 
@@ -111,8 +113,8 @@ def test_an_interrupt_before_a_pass_stops_the_run(tmp_path):
     assert outcome.upscaled == {} and outcome.failure == INTERRUPTED_MESSAGE
 
 
-def test_the_progress_callback_raises_only_when_interrupted():
-    make_run(Pipeline())[0].check_interruption(1, 2, "any", key="args")
+def test_the_interrupt_check_raises_only_when_interrupted():
+    make_run(Pipeline())[0].check_interruption()
     with pytest.raises(UpscaleInterrupted):
         make_run(Pipeline(), interrupted=True)[0].check_interruption()
 
@@ -322,6 +324,30 @@ def test_interrupt_inside_the_decode_stops_before_the_next_tile(tmp_path):
     run, _ = make_tracked_run(pipeline, is_interrupted=lambda: bool(pressed))
     assert run.upscale_images(one_image(), make_request(tmp_path), False, False).failure == INTERRUPTED_MESSAGE
     assert len(tiles) == 2
+
+
+class DroppingPipeline(ModelPipeline):
+    """Drops its DiT after the DiT phase, as the vendored pipeline does without caching, and records in the decode
+    phase whether anything still keeps it alive."""
+
+    def upscale_all_batches(self, runner, ctx, progress_callback, **kwargs):
+        ctx = super().upscale_all_batches(runner, ctx, progress_callback, **kwargs)
+        self.dit_ref = weakref.ref(self.dit)
+        self.dit = runner.dit = None
+        return ctx
+
+    def decode_all_batches(self, runner, ctx, progress_callback, **kwargs):
+        gc.collect()
+        self.dit_alive_in_decode = self.dit_ref() is not None
+        return ctx
+
+
+def test_a_dit_dropped_after_its_phase_is_freed_before_the_decode(tmp_path):
+    """The hooks must not keep a dropped model (and its VRAM) alive through the later phases."""
+    pipeline = DroppingPipeline()
+    run, _ = make_tracked_run(pipeline)
+    assert run.upscale_images(one_image(), make_request(tmp_path), False, False).failure is None
+    assert pipeline.dit_alive_in_decode is False
 
 
 def test_cached_models_are_not_stopped_after_the_run(tmp_path):

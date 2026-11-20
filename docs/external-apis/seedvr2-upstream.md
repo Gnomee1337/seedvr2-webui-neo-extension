@@ -53,7 +53,7 @@ Changes we made to vendored files. Re-apply after every upstream sync. Each code
   `prepare_runner`; `materialize_model` (in the phase) loads weights with `load_state_dict(state, strict=False,
   assign=True)`, and GGUF replaces only Linear layers (`replace_linear_with_quantized`), so container modules (DiT
   blocks, VAE stages) are the same objects before and after, and hooks set on them before a phase fire inside it. The
-  DiT may be wrapped later (`FP8CompatibleDiT`, the model at `.dit_model`); BlockSwap replaces each block's `forward`
+  DiT may be wrapped later (`CompatibleDiT`, the model at `.dit_model`); BlockSwap replaces each block's `forward`
   but blocks are still called through `__call__`, so hooks fire. Sources: `core/model_loader.py`
   (`_load_standard_weights`, `_load_gguf_weights`), `core/model_configuration.py`, `optimization/compatibility.py`,
   `optimization/blockswap.py`. The DiT body runs `for block in self.blocks: … module(...)`

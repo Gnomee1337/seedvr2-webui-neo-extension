@@ -40,10 +40,6 @@ The source of truth is the code.
    overlap, color correction (6 methods, `lab` default), attention (`sdpa` plus the backends whose package is
    installed, looked up without importing). The order on screen is not the order of `run()`'s arguments (that is the
    returned list).
-8. GPU profile (`seedvr2_neo/gpu_profiles.py`, `apply_gpu_profile` in the script): Manual (default, not saved in
-   `ui-config.json`) / 8 / 12 / 24 GB. Choosing a profile, or changing the DiT while one is chosen, sets BlockSwap (by
-   the DiT's size from its header; no listed DiT counts as 3B), VAE tile size and overlap; moving one of those sliders
-   by hand (Gradio's `.input`, not the profile's own update) sets the profile back to Manual. Not a `run()` argument.
 7. Output size line (`seedvr2_neo/size_preview.py`): the size the upscale will give, from the same rules as the run.
    txt2img: from Forge's width, height and Hires. fix controls (found by `elem_id` in `Script.after_component`;
    Hires. fix size by Forge's formula, rounded to `res_step`), updated on any change of them or of the size
@@ -53,6 +49,10 @@ The source of truth is the code.
    image size is read in the browser (`javascript/seedvr2.js`), updated on a size control change and, through the
    hidden refresh button, within a second of the input image changing; no image or the Batch tab → "depends on each
    input image".
+8. GPU profile (`seedvr2_neo/gpu_profiles.py`, `apply_gpu_profile` in the script): Manual (default, not saved in
+   `ui-config.json`) / 8 / 12 / 24 GB. Choosing a profile, or changing the DiT while one is chosen, sets BlockSwap (by
+   the DiT's size from its header; no listed DiT counts as 3B), VAE tile size and overlap; moving one of those sliders
+   by hand (Gradio's `.input`, not the profile's own update) sets the profile back to Manual. Not a `run()` argument.
 
 **Writes:** nothing.
 **On failure:** an unreadable folder counts as empty — the note is shown.
@@ -90,8 +90,8 @@ The source of truth is the code.
    1024–3840, noise 0–1, tile 512–2048, overlap 64–512 and at most half the tile); an unreadable API value takes the
    slider's default, a missing or unknown size mode means Shortest edge (`FALLBACK_SIZE_MODE`; the UI starts in Scale factor). Omitted size arguments (older API callers) → Shortest edge.
    Color correction and attention (`resolve_pipeline_options` in the script, `seedvr2_neo/pipeline_options.py`): a
-   missing or unknown value → `lab` / `sdpa`; a backend whose package the vendored pipeline could not import → `sdpa`,
-   with a console line.
+   missing or unknown value → `lab` / `sdpa`; a backend whose package the vendored pipeline could not import → its
+   version 2 if that imported (FlashAttention 3 → 2, SageAttention 3 → 2), else `sdpa`, with a console line.
 1. Seed: the UI value, or for `-1` — the first generated image's seed (txt2img), else `p.seed`, else random. One seed
    for all images of the run. A typed seed outside 0 … 2³²−1 (the pipeline also seeds numpy) or not a number counts as
    `-1`, with a console line.
@@ -129,7 +129,8 @@ The source of truth is the code.
    checked between passes, between batches (the pipeline's callback and `ctx['interrupt_fn']`) and before every
    container module of the VAE and the DiT (forward pre-hooks set for the four phases and always removed), so a run
    stops within seconds even inside the DiT step or a tiled decode. Progress (`seedvr2_neo/run_progress.py`): before
-   the run the script makes the upscale job 1 of 1 unless Forge is inside a job of its own (img2img Batch), then
+   the run the script makes the upscale job 1 of 1 unless Forge is inside a job of its own (img2img Batch: after the
+   run `job_no` moves past the file's `n_iter` jobs, since `process_images` that would do it is not called), then
    `shared.state.sampling_step` (of 1000) follows the share done — passes by their images, phases by weight, batches,
    and each DiT block — and `shared.state.textinfo` names the phase (and the pass when there are several). After each of the first three phases dropped objects are collected and the
    allocator's cached VRAM is returned (`gc.collect()` + `devices.torch_gc()`). A model that is not cached is dropped

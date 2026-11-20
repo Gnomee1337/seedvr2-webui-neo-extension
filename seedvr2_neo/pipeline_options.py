@@ -9,7 +9,9 @@ own import results (`resolve_attention_mode`), since an installed package can st
 import importlib.util
 from dataclasses import dataclass
 from enum import Enum
-from typing import Any, Callable, Iterable, List, Mapping, Optional, Tuple, Type, TypeVar
+from typing import Any, Callable, Iterable, List, Mapping, Optional, Tuple
+
+from seedvr2_neo.upscale_settings import parse_choice
 
 
 class ColorCorrection(str, Enum):
@@ -47,7 +49,10 @@ ATTENTION_PACKAGES = {
     AttentionMode.SAGEATTN_3: "sageattn3",
 }
 
-E = TypeVar("E", bound=Enum)
+# The backend the vendored pipeline tries before `sdpa` when the requested one did not import
+# (`validate_attention_mode` in `seedvr2_vendor/optimization/compatibility.py`).
+ATTENTION_FALLBACKS = {AttentionMode.FLASH_ATTN_3: AttentionMode.FLASH_ATTN_2,
+                       AttentionMode.SAGEATTN_3: AttentionMode.SAGEATTN_2}
 
 
 @dataclass(frozen=True)
@@ -60,12 +65,12 @@ class PipelineOptions:
 
 def parse_color_correction(value: Any) -> ColorCorrection:
     """The method named by `value` (case and surrounding spaces ignored), or LAB."""
-    return _parse_choice(value, ColorCorrection, DEFAULT_COLOR_CORRECTION)
+    return parse_choice(value, ColorCorrection, DEFAULT_COLOR_CORRECTION)
 
 
 def parse_attention_mode(value: Any) -> AttentionMode:
     """The backend named by `value` (case and surrounding spaces ignored), or `sdpa`."""
-    return _parse_choice(value, AttentionMode, DEFAULT_ATTENTION_MODE)
+    return parse_choice(value, AttentionMode, DEFAULT_ATTENTION_MODE)
 
 
 def installed_attention_modes(find_spec: Optional[Callable[[str], Any]] = None) -> List[AttentionMode]:
@@ -79,11 +84,15 @@ def installed_attention_modes(find_spec: Optional[Callable[[str], Any]] = None) 
 def resolve_attention_mode(requested: AttentionMode,
                            available: Mapping[AttentionMode, bool]) -> Tuple[AttentionMode, Optional[str]]:
     """The backend the run uses and, when it is not the requested one, a console note. `available` is the vendored
-    pipeline's own import result per backend; a backend missing from it counts as unavailable."""
+    pipeline's own import result per backend; a backend missing from it counts as unavailable. An unavailable
+    FlashAttention 3 / SageAttention 3 steps down to version 2 when that imported, as the vendored pipeline would, and
+    anything else to `sdpa`."""
     if requested is DEFAULT_ATTENTION_MODE or available.get(requested, False):
         return requested, None
-    return DEFAULT_ATTENTION_MODE, (f"Attention '{requested.value}' is not available (its package is missing or "
-                                    f"failed to import); using '{DEFAULT_ATTENTION_MODE.value}'.")
+    fallback = ATTENTION_FALLBACKS.get(requested)
+    used = fallback if fallback is not None and available.get(fallback, False) else DEFAULT_ATTENTION_MODE
+    return used, (f"Attention '{requested.value}' is not available (its package is missing or failed to import); "
+                  f"using '{used.value}'.")
 
 
 def choice_values(choices: Iterable[Enum]) -> List[str]:
@@ -91,19 +100,8 @@ def choice_values(choices: Iterable[Enum]) -> List[str]:
     return [choice.value for choice in choices]
 
 
-def _parse_choice(value: Any, enum: Type[E], default: E) -> E:
-    if isinstance(value, enum):
-        return value
-    if isinstance(value, str):
-        wanted = value.strip().casefold()
-        for member in enum:
-            if member.value == wanted:
-                return member
-    return default
-
-
 def _is_installed(package: str, find_spec: Callable[[str], Any]) -> bool:
     try:
         return find_spec(package) is not None
-    except (ImportError, ValueError):  # a broken parent package or a half-installed one
+    except Exception:  # any broken install or import hook: the list is built with the UI and must not break it
         return False

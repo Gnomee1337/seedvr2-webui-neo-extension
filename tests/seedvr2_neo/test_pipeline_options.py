@@ -85,3 +85,11 @@ def test_an_unavailable_backend_falls_back_to_sdpa_with_a_note(available):
     mode, note = resolve_attention_mode(AttentionMode.FLASH_ATTN_2, available)
     assert mode is AttentionMode.SDPA
     assert "flash_attn_2" in note and "sdpa" in note
+
+
+@pytest.mark.parametrize("requested, step_down", [(AttentionMode.FLASH_ATTN_3, AttentionMode.FLASH_ATTN_2),
+                                                  (AttentionMode.SAGEATTN_3, AttentionMode.SAGEATTN_2)])
+def test_a_version_3_backend_steps_down_to_version_2_before_sdpa(requested, step_down):
+    mode, note = resolve_attention_mode(requested, {step_down: True})
+    assert mode is step_down and f"using '{step_down.value}'" in note
+    assert resolve_attention_mode(requested, {step_down: False})[0] is AttentionMode.SDPA

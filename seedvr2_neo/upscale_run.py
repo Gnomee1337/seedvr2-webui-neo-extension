@@ -22,14 +22,12 @@ from seedvr2_neo.memory_plan import CPU_DEVICE, MemoryPlan
 from seedvr2_neo.model_lifecycle import DIT_CACHE_ID, VAE_CACHE_ID, ModelLifecycle
 from seedvr2_neo.pipeline_options import AttentionMode, PipelineOptions
 from seedvr2_neo.run_inputs import group_by_shape, split_into_passes
-from seedvr2_neo.run_progress import UPSCALE_PHASE, ProgressReport, RunProgress
+from seedvr2_neo.run_progress import DECODE_PHASE, ENCODE_PHASE, POSTPROCESS_PHASE, UPSCALE_PHASE, ProgressReport, \
+    RunProgress
 from seedvr2_neo.upscale_settings import OutputTarget, UpscaleSettings
 
 # Why images come back without upscaling when the user pressed Interrupt (infotext and result comment).
 INTERRUPTED_MESSAGE = "Interrupted"
-
-# The phases in the order they run; their indexes are `seedvr2_neo/run_progress.py`'s `PHASES`.
-ENCODE_PHASE, DECODE_PHASE, POSTPROCESS_PHASE = 0, 2, 3
 
 
 def import_pipeline() -> SimpleNamespace:
@@ -101,7 +99,9 @@ class UpscaleInterrupted(Exception):
 def watching_modules(modules: Iterable[torch.nn.Module], on_call: Callable[[torch.nn.Module], None]) -> Iterator[None]:
     """Call `on_call(module)` before the forward of each of `modules` while the block runs. The pipeline checks
     Interrupt only between images, and one image can spend minutes in the DiT or the tiled VAE; a check before each
-    of these calls stops it within a fraction of a second. Always removed, so cached models keep no hook."""
+    of these calls stops it within a fraction of a second. Always removed, so cached models keep no hook. Only the
+    hook handles are kept (they hold the module's hook table weakly): a reference to the modules here would keep a
+    model the pipeline drops after its phase alive, with whatever it still holds, until the last phase ends."""
     def hook(module, args) -> None:
         on_call(module)  # nothing is returned: a pre-hook's return value would replace the module's inputs
 
@@ -109,6 +109,7 @@ def watching_modules(modules: Iterable[torch.nn.Module], on_call: Callable[[torc
     try:
         for module in modules:
             handles.append(module.register_forward_pre_hook(hook))
+        module = modules = None
         yield
     finally:
         for handle in handles:
@@ -175,18 +176,18 @@ class UpscaleRun:
         self._progress = RunProgress([1], hooks.report_progress)
         self._dit_blocks: Tuple[type, ...] = ()  # set only while the DiT phase runs
 
-    def check_interruption(self, *args, **kwargs) -> None:
+    def check_interruption(self) -> None:
         """Stop the run when the user pressed Interrupt. Only Interrupt does: Forge's "Stop generating"
         (`stopping_generation`) means "finish the current image", which should not abort the upscale."""
         if self._hooks.is_interrupted():
             raise UpscaleInterrupted("User interrupted generation.")
 
-    def phase_progress(self, current=None, total=None, *args, **kwargs) -> None:
+    def phase_progress(self, current: object = None, total: object = None, *args, **kwargs) -> None:
         """The pipeline's progress callback: `current` of `total` batches of the phase are done."""
         self.check_interruption()
         self._progress.batch_done(current, total)
 
-    def module_called(self, module) -> None:
+    def module_called(self, module: torch.nn.Module) -> None:
         """Before a watched module's forward during the phases: Interrupt, and a DiT block moves the bar."""
         self.check_interruption()
         if self._dit_blocks and isinstance(module, self._dit_blocks):
@@ -252,10 +253,57 @@ class UpscaleRun:
         With batch size 1 and no temporal overlap the pipeline treats every frame on its own, so the images do not
         change each other's content; the models are loaded once per pass.
 
-        The generation context is built fresh every run, so nothing from a failed or interrupted run is reused. After
-        each phase the dropped objects are collected and the allocator's cached VRAM is returned, so the next phase
-        has the most free VRAM and is less likely to spill into shared memory."""
-        pipeline, settings, plan, options = self._pipeline, request.settings, request.memory_plan, request.options
+        After each phase the dropped objects are collected and the allocator's cached VRAM is returned, so the next
+        phase has the most free VRAM and is less likely to spill into shared memory."""
+        pipeline, settings, plan = self._pipeline, request.settings, request.memory_plan
+        runner, ctx = self._prepare_runner(request, debug)
+        frames_tensor, _generation_info = pipeline.compute_generation_info(
+            ctx=ctx, images=img_tensor, resolution=target.resolution, max_resolution=target.max_resolution,
+            batch_size=1, uniform_batch_size=False, seed=request.seed,
+            prepend_frames=0, temporal_overlap=0, debug=debug
+        )
+
+        color_correction = request.options.color_correction.value
+        tiled_note = '(Tiled)' if settings.use_tile_vae else ''
+        with watching_modules(container_modules(getattr(runner, "vae", None)) + container_modules(runner_dit(runner)),
+                              self.module_called):
+            if not debug_mode: print(f"[SeedVR2] Phase 1/4: Encoding {tiled_note}...")
+            self._progress.start_phase(ENCODE_PHASE)
+            ctx = pipeline.encode_all_batches(runner, ctx=ctx, images=frames_tensor, debug=debug, batch_size=1,
+                                              uniform_batch_size=False, seed=request.seed,
+                                              progress_callback=self.phase_progress, temporal_overlap=0,
+                                              resolution=target.resolution, max_resolution=target.max_resolution,
+                                              input_noise_scale=settings.input_noise, color_correction=color_correction)
+            self._hooks.release_memory()
+
+            if not debug_mode: print("[SeedVR2] Phase 2/4: Upscaling...")
+            try:
+                self._dit_blocks, blocks_per_image = dit_block_types(runner)
+                self._progress.start_phase(UPSCALE_PHASE, blocks_per_image)
+                ctx = pipeline.upscale_all_batches(runner, ctx=ctx, debug=debug, progress_callback=self.phase_progress,
+                                                   seed=request.seed, latent_noise_scale=settings.latent_noise,
+                                                   cache_model=plan.cache_models)
+            finally:
+                self._dit_blocks = ()
+            self._hooks.release_memory()
+
+            if not debug_mode: print(f"[SeedVR2] Phase 3/4: Decoding {tiled_note}...")
+            self._progress.start_phase(DECODE_PHASE)
+            ctx = pipeline.decode_all_batches(runner, ctx=ctx, debug=debug, progress_callback=self.phase_progress,
+                                              cache_model=plan.cache_models)
+            self._hooks.release_memory()
+
+            if not debug_mode: print("[SeedVR2] Phase 4/4: Post-processing...")
+            self._progress.start_phase(POSTPROCESS_PHASE)
+            ctx = pipeline.postprocess_all_batches(ctx=ctx, debug=debug, progress_callback=self.phase_progress,
+                                                   color_correction=color_correction, prepend_frames=0,
+                                                   temporal_overlap=0, batch_size=1)
+        return ctx['final_video']
+
+    def _prepare_runner(self, request: UpscaleRequest, debug) -> Tuple[object, Dict]:
+        """A fresh generation context on the host's device, so nothing from a failed or interrupted run is reused, and
+        the runner with the models (from the cache or the folder), tiling, BlockSwap and attention."""
+        pipeline, settings, plan = self._pipeline, request.settings, request.memory_plan
         ctx = pipeline.setup_generation_context(
             dit_device=self._hooks.device,
             vae_device=self._hooks.device,
@@ -282,52 +330,10 @@ class UpscaleRun:
             decode_tiled=settings.use_tile_vae,
             decode_tile_size=(settings.tile_size, settings.tile_size),
             decode_tile_overlap=(settings.tile_overlap, settings.tile_overlap),
-            tile_debug="false", attention_mode=options.attention_mode.value,
+            tile_debug="false", attention_mode=request.options.attention_mode.value,
             torch_compile_args_dit=None, torch_compile_args_vae=None
         )
         ctx['cache_context'] = cache_context
         # The pipeline's own Interrupt check at the top of each batch (upstream sets it only inside ComfyUI).
         ctx['interrupt_fn'] = self.check_interruption
-
-        frames_tensor, _generation_info = pipeline.compute_generation_info(
-            ctx=ctx, images=img_tensor, resolution=target.resolution, max_resolution=target.max_resolution,
-            batch_size=1, uniform_batch_size=False, seed=request.seed,
-            prepend_frames=0, temporal_overlap=0, debug=debug
-        )
-
-        color_correction = options.color_correction.value
-        tiled_note = '(Tiled)' if settings.use_tile_vae else ''
-        watched = container_modules(getattr(runner, "vae", None)) + container_modules(runner_dit(runner))
-        with watching_modules(watched, self.module_called):
-            if not debug_mode: print(f"[SeedVR2] Phase 1/4: Encoding {tiled_note}...")
-            self._progress.start_phase(ENCODE_PHASE)
-            ctx = pipeline.encode_all_batches(runner, ctx=ctx, images=frames_tensor, debug=debug, batch_size=1,
-                                              uniform_batch_size=False, seed=request.seed,
-                                              progress_callback=self.phase_progress, temporal_overlap=0,
-                                              resolution=target.resolution, max_resolution=target.max_resolution,
-                                              input_noise_scale=settings.input_noise, color_correction=color_correction)
-            self._hooks.release_memory()
-
-            if not debug_mode: print("[SeedVR2] Phase 2/4: Upscaling...")
-            self._dit_blocks, blocks_per_image = dit_block_types(runner)
-            self._progress.start_phase(UPSCALE_PHASE, blocks_per_image)
-            try:
-                ctx = pipeline.upscale_all_batches(runner, ctx=ctx, debug=debug, progress_callback=self.phase_progress,
-                                                   seed=request.seed, latent_noise_scale=settings.latent_noise,
-                                                   cache_model=plan.cache_models)
-            finally:
-                self._dit_blocks = ()
-            self._hooks.release_memory()
-
-            if not debug_mode: print(f"[SeedVR2] Phase 3/4: Decoding {tiled_note}...")
-            self._progress.start_phase(DECODE_PHASE)
-            ctx = pipeline.decode_all_batches(runner, ctx=ctx, debug=debug, progress_callback=self.phase_progress,
-                                              cache_model=plan.cache_models)
-            self._hooks.release_memory()
-
-            if not debug_mode: print("[SeedVR2] Phase 4/4: Post-processing...")
-            self._progress.start_phase(POSTPROCESS_PHASE)
-            ctx = pipeline.postprocess_all_batches(ctx=ctx, debug=debug, progress_callback=self.phase_progress,
-                                                   color_correction=color_correction, prepend_frames=0,
-                                                   temporal_overlap=0, batch_size=1)
-        return ctx['final_video']
+        return runner, ctx

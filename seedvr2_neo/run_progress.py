@@ -6,6 +6,7 @@ each DiT block that starts moves the bar too. Phases get weights by their rough 
 and Forge's ETA move about evenly. No Forge or torch imports: the script turns the fraction into `shared.state`.
 """
 
+import math
 from dataclasses import dataclass
 from typing import Callable, Optional, Sequence
 
@@ -21,7 +22,8 @@ class Phase:
 # The order the pipeline runs them in. Weights: rough shares of a run's time on an 8 GB GPU with VAE tiling; the DiT
 # and the tiled decode take most of it.
 PHASES = (Phase("Encoding", 1.0), Phase("Upscaling", 4.0), Phase("Decoding", 3.0), Phase("Post-processing", 0.5))
-UPSCALE_PHASE = 1  # the DiT phase, the one whose blocks move the bar
+# Indexes into `PHASES`; the DiT phase is the one whose blocks move the bar.
+ENCODE_PHASE, UPSCALE_PHASE, DECODE_PHASE, POSTPROCESS_PHASE = range(len(PHASES))
 
 ProgressReport = Callable[[float, str], None]
 
@@ -55,10 +57,13 @@ class RunProgress:
         self._publish()
 
     def batch_done(self, current, total) -> None:
-        """The pipeline's progress callback: `current` of `total` batches of the phase are done."""
+        """The pipeline's progress callback: `current` of `total` batches of the phase are done. Values that are not
+        finite numbers are ignored: the bar is feedback only and must never fail the upscale."""
         try:
             fraction = float(current) / float(total)
-        except (TypeError, ValueError, ZeroDivisionError):
+        except (TypeError, ValueError, ZeroDivisionError, OverflowError):
+            return
+        if not math.isfinite(fraction):
             return
         self._batch_fraction = min(max(fraction, self._batch_fraction), 1.0)
         self._blocks_seen = 0

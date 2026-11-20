@@ -153,7 +153,9 @@ Source for every line: local `neo` checkout (branch `neo`), file:line named per 
   "stop after current image" and a hard interrupt (`modules/ui_toprow.py:119-124`, option `interrupt_after_current`), so a
   script that sets `job_count` above 1 makes the first click a soft `stop_generating()`. In img2img Batch the runner sets
   `state.job_count = len(batch_images) * p.n_iter` and `state.job = "i out of N"` BEFORE calling the script per file
-  (`modules/img2img.py:46, 62`), so a script that overwrites `job_count` per file breaks that outer bar; add to or restore
+  (`modules/img2img.py:46, 62`; `job_count = len(batch_images) * p.n_iter`, set once before the loop, and the loop never
+  calls `nextjob()` — only `process_images` does, so a script that replaces it must advance `job_no` itself; checked in
+  the local Neo checkout), so a script that overwrites `job_count` per file breaks that outer bar; add to or restore
   the outer values instead.
 - **`state.skipped`:** the Skip button sets it (`shared_state.py:85-87`); `begin()` clears it, `process_images_inner` clears it
   at the top of each batch (`processing.py:931-932`), Extras clears it per item (`postprocessing.py:58`) and checks it after
