@@ -40,7 +40,7 @@ block the run is visible and stoppable, and the main settings are one choice awa
       old behaviour (`lab`, `sdpa`) (tests; live run of every color correction).
 - [x] The Script title has no "(24G)"; the compatibility effects are documented (README, `07-RISKS.md`).
 - [x] Choosing a GPU profile changes the tile and BlockSwap sliders; the sliders still change freely (tests). The
-      owner's look at the UI is still open.
+      owner checked the UI live: profile, color correction and attention work.
 - [x] All tests pass (`python -m pytest tests`): 2583 passed, 1 skipped, 3 xfailed. CI: on push.
 
 ## Which checks are needed on `/block-done`
@@ -68,4 +68,4 @@ B11 closed (UI layout). Live checks: Claude launches the owner's Forge with `--a
   not caused by the hooks (`07-RISKS.md` R6).
 
 ## Open questions
-- The owner's look at the UI (GPU profile next to BlockSwap, the two new dropdowns in Advanced Settings).
+None.
