@@ -111,8 +111,11 @@ Live-checked on an 8 GB GPU without bf16, 16 GB RAM, 1080px output, VAE tile 512
   ~12 min. Not caused by batching, but users with batches feel it most.
 - 🟡 R4 (S2×L2) **A 4K output takes many minutes on an 8 GB GPU.** Live, 3B GGUF, tile 512: one 16:9 image to
   3840×2160 — ~8 min without `--cuda-malloc`, ~17.5 min with it (DiT step 5.7 / 10.5 min, VRAM full, no OOM, clean
-  image). Scale factor ×3–×4 of a txt2img image after Hires. fix lands there easily. README gives the numbers; the
-  console line names the output size before the run. Faster only with DiT tiling (roadmap).
+  image). Faster only with DiT tiling (roadmap).
+- 🟡 R6 (S2×L3) **The default ×2 makes UI runs much bigger than before.** The UI starts in Scale factor ×2 (owner's
+  choice): SDXL 1024² → 2048² (4.2 MP, ~3.5× the old 1080 px default); with Hires. fix ×1.5 first → 3072² (9.4 MP,
+  more than the 4K case above). The size line under the controls shows it before Generate; README says so. A user who
+  prefers the shortest edge picks it again each session (the mode is not saved).
 - 🟡 R4 (S2×L2) **A pass may still need a few GB of RAM.** Passes are capped at 16 MP of output (`PASS_BUDGET_PIXELS`
   in `seedvr2_neo/run_inputs.py`), but the pipeline keeps its own copies (latents, decoded frames, alpha) per pass;
   peak RAM per pass is not measured. Huge inputs (a decompression bomb through the API) are decoded by Forge before
@@ -142,8 +145,13 @@ Live-checked on an 8 GB GPU without bf16, 16 GB RAM, 1080px output, VAE tile 512
 - 🟢 R2 (S1×L2) **The img2img size line depends on Forge Neo's page markup.** `javascript/seedvr2.js` finds the input
   image with the selector Neo's own "Resize by" preview uses; if Neo changes it, the line falls back to "depends on
   each input image" (the run is unaffected). The txt2img line needs Forge's width / height / Hires. fix `elem_id`s;
-  without them it stays generic. Not shown before a run: the old Hires. fix behaviour option
-  (`use_old_hires_fix_width_height`), where the line assumes the current behaviour.
+  without them it stays generic; a later component with the same `elem_id` would replace Forge's (none known).
+  The line assumes the current Hires. fix behaviour (not `use_old_hires_fix_width_height`) and reads `res_step` live,
+  while Forge's rounding uses the value read at start (the option needs a restart): off by one step until then. The
+  img2img size comes from `naturalWidth`, falling back to the rendered width (as Neo's own preview), not checked live.
+- 🟢 R1 (S1×L1) **An image thinner than about 1920:1 cannot be upscaled in Scale factor / Long edge** (about 2×
+  resolution : 1 in Shortest edge): the capped short side is under 2 px, the pipeline fails on it and the image comes
+  back with `SeedVR2 Error` (other sizes in the run are unaffected). The size line says "too thin to upscale".
 - 🟢 R1 (S1×L1) **A failure note from the second file on is not shown in the img2img Batch tab:** Forge keeps the
   `Processed` (and its comments) of the first file only; each image's infotext still has `SeedVR2 Error`.
 - 🟢 R1 (S1×L1) **A 16-bit grayscale PNG loses its transparency key** (it is scaled correctly, but comes back opaque).
@@ -193,6 +201,7 @@ Live-checked on an 8 GB GPU without bf16, 16 GB RAM, 1080px output, VAE tile 512
 ## Top risks
 1. 🟡 R6 VAE decode spills with `--cuda-malloc` — section 3.
 2. 🟡 R6 A batch multiplies the `--cuda-malloc` decode spill — section 4.
-3. 🟡 R4 Corrupt GGUF header can hang the WebUI — section 1.
-4. 🟡 R4 7B with too few BlockSwap blocks — section 3.
-5. 🟡 R4 A pass may still need a few GB of RAM (not measured) — section 4.
+3. 🟡 R6 The default ×2 makes UI runs much bigger than before — section 4.
+4. 🟡 R4 Corrupt GGUF header can hang the WebUI — section 1.
+5. 🟡 R4 7B with too few BlockSwap blocks — section 3.
+6. 🟡 R4 A pass may still need a few GB of RAM (not measured) — section 4.

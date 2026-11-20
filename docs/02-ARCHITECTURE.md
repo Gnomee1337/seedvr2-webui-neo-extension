@@ -66,14 +66,16 @@ None of its own: the UI lives inside the txt2img / img2img tabs.
 - `seedvr2_script.py` — the Forge side: UI controls, the model refresh button and the 7B low-VRAM note, the model
   check and pipeline import before a run, collecting the images to upscale (txt2img base images / img2img inputs),
   the SD unload, the process-wide `MODEL_LIFECYCLE`, Forge's hooks for the run (`forge_hooks`: device, memory release,
-  `shared.state.interrupted`), saving (`-seedvr2`, `-original`) and Forge's `Processed`. The output size preview:
-  `after_component` keeps Forge's txt2img width / height / Hires. fix controls (by `elem_id`), whose changes update
-  the size line; in img2img the browser reads the image size.
+  `shared.state.interrupted`), saving (`-seedvr2`, `-original`) and Forge's `Processed`. `ui()` builds four sections
+  (`_model_controls`, `_size_controls`, `_memory_controls`, `_advanced_controls`) and returns the controls in `run()`'s
+  order. The output size preview: `after_component` keeps Forge's txt2img width / height / Hires. fix controls (by
+  `elem_id`), whose changes update the size line; in img2img the browser reads the image size.
 
 ### javascript/, style.css
 Loaded by Forge into the page (any extension's `javascript/*.js` and `style.css`).
-- `javascript/seedvr2.js` — the img2img input image size read from the page (`seedvr2Img2imgPreview`, the `_js` of the
-  preview events), and a once-a-second check that presses the hidden refresh button when that size changes.
+- `javascript/seedvr2.js` — on page load presses the hidden txt2img refresh button once (the saved UI values are in
+  place by then); the img2img input image size read from the page (`seedvr2Img2imgPreview`, the `_js` of the preview
+  events), and a once-a-second check that presses the hidden img2img refresh button when that size changes.
 - `style.css` — the hidden refresh button, the size group, the quick scale buttons, the highlighted size line.
 
 ### seedvr2_neo/
@@ -94,7 +96,8 @@ No Forge or Gradio imports; torch only in `upscale_run.py`. Tested outside Forge
 - `upscale_settings.py` — slider `Bounds` (resolution, scale factor, long edge, noise, tile size and overlap),
   `SizeMode` (Shortest edge / Scale factor / Long edge) and `parse_upscale_settings` → `UpscaleSettings`, clamped to
   those bounds; the script builds its sliders from the same bounds. `UpscaleSettings.target_for(size)` →
-  `OutputTarget` (the pipeline's `resolution` / `max_resolution` for one input size, its output size and pixels).
+  `OutputTarget` (the pipeline's `resolution` / `max_resolution` for one input size, its output size and pixels, and
+  `raise_note` for the console and the size line).
 - `run_results.py` — `plan_saving` → `SavePlan`; `read_option` (a Forge option with the request's `override_settings`);
   `GenerationParam` keys and `seedvr2_generation_params` (per input: its resolution, the size mode) /
   `failure_generation_params`; `merge_run_images` → `RunImage` list (one per input); `BaseInfotext` (prompt part +

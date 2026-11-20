@@ -41,7 +41,9 @@ The source of truth is the code.
 7. Output size line (`seedvr2_neo/size_preview.py`): the size the upscale will give, from the same rules as the run.
    txt2img: from Forge's width, height and Hires. fix controls (found by `elem_id` in `Script.after_component`;
    Hires. fix size by Forge's formula, rounded to `res_step`), updated on any change of them or of the size
-   controls; without those controls (a UI layout setting can build the scripts first) a generic note. img2img: the
+   controls, and once after the page loads (`javascript/seedvr2.js` presses a hidden button: Forge applies
+   `ui-config.json` after `ui()`, so the line made there may name the code defaults); without those controls (a UI
+   layout setting can build the scripts first) a generic note. An image too thin to upscale: "too thin to upscale". img2img: the
    image size is read in the browser (`javascript/seedvr2.js`), updated on a size control change and, through the
    hidden refresh button, within a second of the input image changing; no image or the Batch tab → "depends on each
    input image".
@@ -93,10 +95,13 @@ The source of truth is the code.
    with `-original` before the upscale; txt2img base images are saved by Forge.
 4. "Unload SD Checkpoint" → `modules.sd_models.unload_model_weights()` + `devices.torch_gc()`.
 5. Passes (`UpscaleRun.upscale_images` in `seedvr2_neo/upscale_run.py`; `group_by_shape` + `split_into_passes`): the inputs are grouped by size and mode. Each size gets
-   its `OutputTarget` (`UpscaleSettings.target_for`): Shortest edge — the slider value for every size; Scale factor —
-   the factor times the input's shortest edge; Long edge — the shortest edge giving that long edge. In the last two the
-   output long edge is at most 3840 (`MAX_OUTPUT_LONG_EDGE`) and a shortest edge under 512 is raised to 512. A console
-   line per group names the output size (and the raise). Each group is cut into passes of at most 16 MP of upscaled
+   its `OutputTarget` (`UpscaleSettings.target_for`): Shortest edge — the slider value for every size, the long edge
+   capped at 4× it; Scale factor — the factor times the input's size, the long edge at most 3840
+   (`MAX_OUTPUT_LONG_EDGE`); Long edge — the shortest edge giving the chosen long edge. In the last two the cap is the
+   pipeline's `max_resolution`; in Scale factor a shortest edge under 512 is raised towards 512 only while the long edge
+   stays within the cap (a very wide panorama keeps the cap). An image so thin that the capped short side is under
+   2 px cannot be upscaled: the pipeline fails on it and it comes back with `SeedVR2 Error`. A console line per group
+   names the output size (and the raise, with the shortest edge reached). Each group is cut into passes of at most 16 MP of upscaled
    output (`PASS_BUDGET_PIXELS`, counted with that size's output); a larger single frame gets its own pass. Each
    pass → one tensor `[N, H, W, C]` float16 (built per image).
 6. Cached models (`GlobalModelCache`, ids `forge_dit` / `forge_vae`) are dropped before the run when "Force Reload" is on

@@ -30,3 +30,10 @@ No blockers, 2 IMPORTANT, 5 MINOR. Committed suite: 1793 passed, 1 skipped, 3 xf
 4. Gradio 4.40: all keywords used exist; `.change` uses `trigger_mode="always_last"`; `do_not_save_to_config` honoured.
 5. `OutputTarget` vs torchvision + `SideResize` + even rounding: 7943 cases, 0 mismatches; `ctx` rebuilt per pass.
 6. `finish_images` / `seedvr2_generation_params`: single callers, updated, covered by tests.
+
+## Re-check (commit 811bb90)
+I1 and I2 fixed; seams hold; 2471 tests pass. Size math vs the pipeline: 0 mismatches in 7943 cases; 32,000 more cases
+none above the cap; Scale factor never below min(factor × input, 3840); any short edge under 512 sits at the cap.
+33 of 32,000 have a 0 px side (very thin inputs): the preview says "too thin", the run fails inside the pipeline as
+Shortest edge already did (MINOR, R2). The txt2img load refresh needs the hidden button in the page while the script
+is not selected (Gradio 4 keeps hidden blocks; one click, no retry) — not tried in a browser.

@@ -139,8 +139,9 @@ Why: the UI cannot send more than the sliders allow, an API call could (an unbou
 memory). One set of bounds (`seedvr2_neo/upscale_settings.py`) builds the sliders and checks the values.
 
 ### New script arguments go at the end of `script_args`, with defaults that keep the old behaviour
-Why: API callers pass the arguments by position, and Forge passes a shorter list to `run()` as is. Appended
-parameters with Python defaults let an older caller's list keep working; a test checks the order against the UI.
+Why: API callers pass the arguments by position, and Forge does not pad a shorter list with the UI's values. Appended
+parameters with Python defaults, read leniently, let an older caller's list keep working; a test checks the order
+against the UI.
 
 ### Output size: three modes, the UI starts in "Scale factor ×2", the API falls back to the shortest edge
 Why: "×2" or "2K wide" had to be worked out by hand for every input size. A scale factor and a long edge in px are
@@ -150,8 +151,11 @@ keep their size. The shortest-edge slider keeps its label and default, so its sa
 mode is chosen. The mode itself is not kept in `ui-config.json` (`do_not_save_to_config`): a saved mode would be
 applied after the UI is built and disagree with the visible slider, so the UI always starts in Scale factor. Each input size gets its own resolution (passes are per size anyway). The final size is shown under
 the controls before a run. A px long edge, not "2K / 4K" buttons: the names invite
-"8K" next, and "4K" on the shortest edge would give a 6827 px wide 16:9 image. Below 512 px the size is raised to 512,
-not lowered: the slider never went below 512 and smaller sizes are not checked with the model.
+"8K" next, and "4K" on the shortest edge would give a 6827 px wide 16:9 image. In the new modes the long edge cap
+(3840 or the chosen long edge) is the pipeline's limit and wins over everything else: a small image is raised towards a
+512 px shortest edge (the slider never went below 512, smaller sizes are not checked with the model) only while the
+long edge stays within the cap, so a panorama is never made smaller than asked to reach 512. Long edge mode therefore
+never raises: its cap is the chosen long edge.
 
 ### Interruption checks only `shared.state.interrupted`
 Why (*reconstructed from code*): the original author removed the `stopping_generation` check deliberately. Likely reason:

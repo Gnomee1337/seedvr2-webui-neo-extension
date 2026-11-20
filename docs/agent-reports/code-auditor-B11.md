@@ -123,3 +123,36 @@ now gives 1793). The card is deleted on `/block-done`, but the acceptance checkl
 - No stale reference to `estimate_output_pixels` or `UpscaleSettings.max_resolution` in code or permanent docs;
   "Scale presets" removed from `06-IDEAS.md`.
 - No debug output, commented-out code or TODOs added.
+
+---
+
+## Re-check after `811bb90` (`git diff a85a0de..811bb90`)
+
+Tests: **2471 passed, 1 skipped, 3 xfailed**. `OutputTarget.output_size` vs the vendored resize logic re-run on 300
+random cases: 0 mismatches.
+
+- **I-1 — fixed.** In Scale factor / Long edge the cap is `max_resolution` (3840 or the chosen long edge), with no 4:1 cap:
+  ×1 of 600×3600 → 600×3600; ×2 of 600×3600 → 640×3840; ×2 of 2048×448 → 3840×840; Long edge 3840 of 768×3840 →
+  768×3840. The raise stops where the long edge would pass the cap (300×1500 ×1 → 512×2560; 100×1000 ×2 → 384×3840).
+  Long edge mode no longer gives a long edge above the chosen one (1024×256 with Long edge 1024 → 1024×256, before:
+  2048×512). Shortest edge mode unchanged (still `resolution × 4`).
+- **I-2 — fixed.** A hidden `seedvr2_txt2img_size_refresh` button, wired with the same inputs as the `.change` events,
+  is clicked once in `onUiLoaded` (guarded when the button is absent). Forge applies the saved values on the server before
+  the page loads, so the click sends the values the page shows.
+- **M-1 — fixed.** `OutputTarget.raise_note()` names the shortest edge actually reached, and both the console line and the preview use it.
+  Sizes so thin that a side becomes 0 px now give "too thin to upscale" in the preview, not "0×3840".
+- **M-2 — fixed** in the UI text (`RESOLUTION.minimum`); the field comment `upscale_settings.py:66` still says
+  "512 px" (comment only). **M-3, M-4, M-5, M-6 — fixed** (`ui()` is now 10 lines over four section methods; module
+  still ~470 lines, over the ~300 guideline — leave as is or split the preview helpers out later). **M-7** — docs being updated, not checked.
+- `finish_images` `zip(..., strict=True)`: fine on Python 3.10+ (project minimum), and all three lists are built per
+  input in `run()`.
+
+New observations (no new BLOCKER / IMPORTANT):
+- 🟢 R2 (S1×L2) — the pipeline can now get a `resolution` under 512 (Long edge 1024 on a 4:1 input → 256; 100×1000 ×2
+  → 384). The old code also produced frames under 512 through the `max_resolution` scale-down, so this is not a new kind of input to the
+  model, but `05-DECISIONS.md` ("Below 512 px the size is raised to 512, not lowered") must say "towards 512, within
+  the long-edge cap; Long edge mode never raises" — included in the doc update you mentioned.
+- 🟢 R1 (S1×L1) — the new comment in `run()` (`scripts/seedvr2_script.py`, "or whatever Forge shifts into the missing
+  positions") says Forge shifts the arguments of the scripts that follow into a short slice. `external-apis/forge-neo.md` says
+  instead that "`run()` gets only the values sent". One of the two is wrong: check it against Neo's `init_script_args` /
+  `ScriptRunner.run` and keep only the verified version (in forge-neo.md, with the comment pointing there).

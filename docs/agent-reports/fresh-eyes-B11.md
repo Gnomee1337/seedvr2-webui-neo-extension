@@ -113,3 +113,35 @@ Rating: 🟢 R1 (S1×L1).
   nothing; failed images keep the per-image keys plus `SeedVR2 Error`.
 - Hidden img2img Numbers/Button are not in the returned list, so `script_args` positions are unchanged.
 - `do_not_save_to_config` is honoured by `apply_field` per `forge-neo.md:175-176`; radio and visible column agree on load.
+
+## Re-check after fixes (`git diff a85a0de..811bb90`)
+
+- **#1 (txt2img line at page load) — fixed.** `scripts/seedvr2_script.py` `_preview_txt2img_output_size` adds a hidden
+  `seedvr2_txt2img_size_refresh` button wired to the same event as the `.change` listeners; `javascript/seedvr2.js`
+  presses it once in `onUiLoaded`, when the page already holds the `ui-config.json` values. Test
+  `test_txt2img_preview_is_refreshed_once_the_page_has_the_saved_values` checks the wiring, and the ID test checks the JS.
+  Not live-checked: that Gradio has its listeners attached by `onUiLoaded` (the img2img poll relies on the same timing).
+- **#5 ("raised to 512") — fixed.** `target_for` raises only up to `fitting` (the largest shortest edge whose long edge
+  fits the cap); `max_resolution` is now the mode's cap (3840, or the chosen long edge), so the 4:1 cap is gone in the
+  new modes; `raise_note()` names the real edge and is shared by the console line and the size line (also closes #10).
+  Checked by hand: 100×1000 ×1 → 384×3840 "(shortest edge raised to 384 px)"; 400×2000 ×2 → 768×3840. The radio info no
+  longer promises a 512 minimum.
+- **#3 (short `script_args` comment) — fixed.** The `run()` comment now covers both the Python defaults and values
+  shifted in from the next script, both read leniently with Shortest edge as the fallback.
+- **#2** — accepted by the owner; docs are being updated separately (not re-checked).
+- No other behaviour change: the `ui()` split into `_model_controls` / `_size_controls` / `_memory_controls` /
+  `_advanced_controls` keeps the returned list order; `zip(..., strict=True)` can only fire on a length mismatch that
+  the call site rules out; `describe_output_size` now returns a message for an `OverflowError` or a 0 px side instead
+  of raising.
+
+### New in this diff
+- 🟢 R2 (S2×L1) **The new modes now send the pipeline shortest edges under 512 px, down to 1 px.** `upscale_settings.py`
+  `target_for`: no `RESOLUTION.minimum` clamp anymore when the cap stops the raise. Long edge 1024 on a 1920×640 input
+  → `resolution=341` (output 1022×340); ×2 of 16000×1000 → `resolution=240` (3840×240). Before, the model never got
+  less than 512 (the slider minimum, and `05-DECISIONS.md` says smaller sizes "are not checked with the model"). The
+  resulting quality and VAE tiling at these sizes are not live-checked; the aspect ratios involved (wider than ~2:1 at
+  Long edge 1024, wider than 7.5:1 at 3840) are uncommon. Suggest one live run at Long edge 1024 with a 3:1 image.
+- 🟢 R1 (S1×L1) **txt2img preview now depends only on `txt2img_hr-checkbox`.** `TXT2IMG_SIZE_SOURCES` dropped the
+  `txt2img_hr` fallback. If Neo's `after_component` ever reports the InputAccordion under its outer `elem_id`, the
+  txt2img line silently falls back to the generic note (a safe failure, but nothing would show it).
+- Not run here: pytest (not installed in this environment's Python); the size math above was computed against the code.

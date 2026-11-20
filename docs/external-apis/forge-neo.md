@@ -185,6 +185,10 @@ of a local `neo` checkout finds nothing: Neo neither uses nor reserves such a fo
     defaults and then **replaces** the selected script's slice with `request.script_args`
     (`script_args[args_from:args_to] = request.script_args`), so a short list is not padded with defaults: `run()` gets
     only the values sent, and a required parameter left out fails the request with a `TypeError` (HTTP 500; checked live).
+    The mechanism (`modules/api/api.py:333`, `modules/scripts.py:792`): the slice assignment with a shorter list shrinks
+    the whole list, and `run()` gets `args[args_from:args_to]` of the shrunk list, so the values of scripts placed after
+    the selected one move into its missing positions; when nothing follows it, only the values sent arrive (the live
+    case above). Which values move in depends on the other installed scripts, so every argument is read leniently.
     The code defaults therefore reach `run()` only for the always-on scripts, never for a selected script's omitted args.
   - **Reset by the user:** Settings → "Defaults" tab (`loadsave.create_ui()`, `modules/ui_settings.py`) edits and writes values
     ("View changes", "Apply", applied after a UI restart), or delete the key / the file `ui-config.json` and press "Reload UI"
