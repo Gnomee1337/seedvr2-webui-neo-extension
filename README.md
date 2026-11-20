@@ -53,8 +53,9 @@ Usually you only need to choose the output size with **Output Size Mode**:
 - **Long edge** — the longest side of each image in px (1024–3840; 2048 is "2K", 3840 is "4K UHD" for 16:9).
 
 In the Scale factor and Long edge modes the long edge never goes above 3840 px (larger sizes need a DiT that works in
-tiles, which is not there yet), and no image is made smaller than 512 px on its shortest edge, so ×1 of a small image
-is still an upscale. Images of different sizes in one img2img batch each get their own size.
+tiles, which is not there yet) or above the chosen long edge. In Scale factor a small image is raised to 512 px on its
+shortest edge, so ×1 of a small image is still an upscale; a very wide panorama is raised only as far as its long edge
+stays within 3840 px. Images of different sizes in one img2img batch each get their own size.
 
 The line under the size controls shows the final size before you press Generate: in txt2img from the width, height
 and Hires. fix settings, in img2img from the image you loaded (the Batch tab says it depends on each image). The
@@ -94,8 +95,9 @@ them on every run anyway.
 - **VAE Tile Size** (Advanced Settings) is 512 by default. Without `--cuda-malloc` that keeps VAE encoding and
   decoding inside VRAM; with 1024 a 1080px image overflowed into shared memory, and with `--cuda-malloc` a run could
   hang for many minutes. With `--cuda-malloc` the decode at 512 still spills somewhat (next point).
-- **Large outputs take minutes.** 3B GGUF, VAE tile 512, 8 GB GPU without bf16: ×2 of a 512×384 image (1024×768)
-  ~50 s; a 16:9 image to 3840×2160 (Long edge 3840) ~8 minutes without `--cuda-malloc` (DiT step 5.7 min, decoding
+- **Large outputs take minutes.** The default ×2 of a 1024×1024 SDXL image is 2048×2048, about 3.5× the pixels of the
+  1080 px shortest edge earlier versions used; with Hires. fix before it, more. 3B GGUF, VAE tile 512, 8 GB GPU
+  without bf16: ×2 of a 512×384 image (1024×768) ~50 s; a 16:9 image to 3840×2160 (Long edge 3840) ~8 minutes without `--cuda-malloc` (DiT step 5.7 min, decoding
   1.5 min) and ~17.5 minutes with it (DiT step 10.5 min, decoding 6.5 min), VRAM full in both cases; the image is clean.
   For quick results stay at 2048 or below.
 - **`--cuda-malloc`** in Forge's launch options changes the speed: in the same test, VAE decoding took 12 s without
@@ -113,10 +115,10 @@ use_tile_vae, tile_size, tile_overlap, debug_mode, after_run, blocks_to_swap, sw
 size_mode, scale_factor, long_edge
 ```
 
-`size_mode` is `"Scale factor"`, `"Shortest edge"` or `"Long edge"`. The last three arguments may be left out: then
-the shortest edge mode is used, as in versions before them (the UI starts in "Scale factor"). Forge does not fill in other omitted arguments, so send
-at least the first 13. Numbers outside a slider's range are clamped to it; an unknown `size_mode` means
-`"Shortest edge"`.
+`size_mode` is `"Scale factor"`, `"Shortest edge"` or `"Long edge"`. A missing or unknown `size_mode` means
+`"Shortest edge"`, as in versions before the modes, although the UI and `/sdapi/v1/script-info` show "Scale factor" as
+the default. Forge does not fill omitted arguments with the UI's values, so send all 19 (older callers' 13 or 16 still
+get the shortest edge). Numbers outside a slider's range are clamped to it.
 
 <img width="1660" height="694" alt="Extension UI" src="https://github.com/user-attachments/assets/777c34e7-aca6-4e51-9994-f02f817311ea" />
 

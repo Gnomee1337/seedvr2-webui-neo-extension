@@ -152,6 +152,8 @@ Live-checked on an 8 GB GPU without bf16, 16 GB RAM, 1080px output, VAE tile 512
 - 🟢 R1 (S1×L1) **An image thinner than about 1920:1 cannot be upscaled in Scale factor / Long edge** (about 2×
   resolution : 1 in Shortest edge): the capped short side is under 2 px, the pipeline fails on it and the image comes
   back with `SeedVR2 Error` (other sizes in the run are unaffected). The size line says "too thin to upscale".
+- 🟢 R1 (S1×L1) **In the new modes the model can get a shortest edge under 512 px** (a wide image whose long edge is
+  capped: Long edge 1024 on 1920×640 → 1022×340). Checked live once on the 8 GB target, 3B GGUF: clean result, 44 s.
 - 🟢 R1 (S1×L1) **A failure note from the second file on is not shown in the img2img Batch tab:** Forge keeps the
   `Processed` (and its comments) of the first file only; each image's infotext still has `SeedVR2 Error`.
 - 🟢 R1 (S1×L1) **A 16-bit grayscale PNG loses its transparency key** (it is scaled correctly, but comes back opaque).
