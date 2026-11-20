@@ -127,13 +127,13 @@ def container_modules(model) -> List[torch.nn.Module]:
     return [module for module in model.modules() if next(module.children(), None) is not None]
 
 
-def runner_dit(runner):
+def runner_dit(runner: object) -> Optional[object]:
     """The runner's DiT, unwrapped from the vendored fp8 / GGUF wrapper (`dit_model`), or None."""
     model = getattr(runner, "dit", None)
     return getattr(model, "dit_model", model)
 
 
-def dit_block_types(runner) -> Tuple[Tuple[type, ...], int]:
+def dit_block_types(runner: object) -> Tuple[Tuple[type, ...], int]:
     """The classes of the DiT's transformer blocks and how many blocks one forward runs, or ((), 0) when the runner
     holds no DiT with blocks."""
     blocks = getattr(runner_dit(runner), "blocks", None)
@@ -300,7 +300,7 @@ class UpscaleRun:
                                                    temporal_overlap=0, batch_size=1)
         return ctx['final_video']
 
-    def _prepare_runner(self, request: UpscaleRequest, debug) -> Tuple[object, Dict]:
+    def _prepare_runner(self, request: UpscaleRequest, debug: object) -> Tuple[object, Dict]:
         """A fresh generation context on the host's device, so nothing from a failed or interrupted run is reused, and
         the runner with the models (from the cache or the folder), tiling, BlockSwap and attention."""
         pipeline, settings, plan = self._pipeline, request.settings, request.memory_plan

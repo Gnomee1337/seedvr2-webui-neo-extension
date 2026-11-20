@@ -56,7 +56,7 @@ class RunProgress:
         self._blocks_per_image = blocks_per_image if blocks_per_image and blocks_per_image > 0 else None
         self._publish()
 
-    def batch_done(self, current, total) -> None:
+    def batch_done(self, current: object, total: object) -> None:
         """The pipeline's progress callback: `current` of `total` batches of the phase are done. Values that are not
         finite numbers are ignored: the bar is feedback only and must never fail the upscale."""
         try:

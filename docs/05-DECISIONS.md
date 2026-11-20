@@ -176,7 +176,7 @@ vendored loaders keep these module objects) and always removed, so cached models
 ### Forge's progress bar: the upscale moves `sampling_step`, and becomes a job of its own only when Forge has none left
 Why: Forge's bar is `job_no / job_count` plus the current job's steps. After txt2img every job is done and a single
 img2img has no job count, so the upscale becomes job 1 of 1; in img2img Batch Forge counts the files (× `n_iter`)
-and its counter stays, and the script moves `job_no` past each file, which Forge leaves to `process_images`. `job_count` is never raised above 1: Forge's Interrupt button behaves differently for several jobs. Phases are
+and the script keeps that counter: it only moves `job_no` past each file, which Forge leaves to `process_images`. `job_count` is never raised above 1: Forge's Interrupt button behaves differently for several jobs. Phases are
 weighted by their rough share of a run's time (`seedvr2_neo/run_progress.py`).
 
 ## VRAM and caching
