@@ -52,6 +52,10 @@ class Component:
     def change(self, fn=None, inputs=None, outputs=None, **kwargs):
         self.events.append({"event": "change", "fn": fn, "inputs": inputs, "outputs": outputs, **kwargs})
 
+    def input(self, fn=None, inputs=None, outputs=None, **kwargs):
+        """Gradio 4: fires only when the user changes the value, not for a value an event handler returns."""
+        self.events.append({"event": "input", "fn": fn, "inputs": inputs, "outputs": outputs, **kwargs})
+
 
 def make_gradio() -> types.ModuleType:
     gradio = types.ModuleType("gradio")
@@ -76,7 +80,8 @@ class Options:
 
 
 class State:
-    """`shared.state` (`modules/shared_state.py`); the script reads only `interrupted`."""
+    """`shared.state` (`modules/shared_state.py`); the script reads `interrupted` and drives the progress fields
+    (`job_no`, `job_count`, `sampling_step`, `sampling_steps`, `textinfo`). `progress` records every bar position."""
 
     def __init__(self):
         self.skipped = False
@@ -86,6 +91,18 @@ class State:
         self.job_no = 0
         self.job_count = 0
         self.job_timestamp = "0"
+        self.sampling_step = 0
+        self.sampling_steps = 0
+        self.textinfo = None
+
+    def progress_fraction(self) -> float:
+        """Forge's formula (`modules/progress.py`): finished jobs plus the current job's share of steps."""
+        if self.job_count <= 0:
+            return 0.0
+        fraction = self.job_no / self.job_count
+        if self.sampling_steps > 0:
+            fraction += self.sampling_step / self.sampling_steps / self.job_count
+        return min(fraction, 1.0)
 
 
 @dataclass
@@ -307,6 +324,8 @@ class FakePipeline:
         self.interrupt_in: Optional[str] = None
         self.only_in_pass: Optional[int] = None  # 0-based pass the failure or interrupt happens in; None = every pass
         self.phases_run: List[str] = []
+        self.attention_available: List[str] = []  # the vendored import flags that are True, e.g. "SAGE_ATTN_2_AVAILABLE"
+        self.progress_seen: List[float] = []  # Forge's bar at each progress callback
         self.calls: List["PipelineCall"] = []  # every call of a vendored function, filled by `pipeline_modules`
 
     def _phase(self, name, progress_callback):
@@ -318,6 +337,7 @@ class FakePipeline:
             raise self.failure
         if progress_callback is not None:
             progress_callback(1, 1, 1, name)
+            self.progress_seen.append(self.forge.state.progress_fraction())
 
     def setup_generation_context(self, **kwargs):
         self.context_kwargs.append(kwargs)
@@ -395,7 +415,16 @@ def pipeline_modules(pipeline: FakePipeline) -> Dict[str, types.ModuleType]:
     debug.Debug = Debug
     cache = types.ModuleType("seedvr2_vendor.core.model_cache")
     cache.get_global_cache = lambda: pipeline.cache
-    modules = {debug.__name__: debug, cache.__name__: cache}
+    compatibility = types.ModuleType("seedvr2_vendor.optimization.compatibility")
+
+    def attention_flag(name):
+        """The import flags (`*_AVAILABLE`), read when the script imports the pipeline, so a test sets them later."""
+        if name.endswith("_AVAILABLE"):
+            return name in pipeline.attention_available
+        raise AttributeError(name)
+
+    compatibility.__getattr__ = attention_flag
+    modules = {debug.__name__: debug, cache.__name__: cache, compatibility.__name__: compatibility}
     for module_name, functions in PIPELINE_FUNCTIONS.items():
         module = types.ModuleType(module_name)
         for name in functions:
@@ -462,6 +491,7 @@ def run_args(**overrides):
     args = dict(dit_model_name=DIT, vae_model_name=VAE, seed=-1, resolution=1080, input_noise=0.0, latent_noise=0.0,
                 force_reload=False, unload_sd=True, save_original=False, use_tile_vae=True, tile_size=512,
                 tile_overlap=128, debug_mode=False, after_run="Unload SeedVR2", blocks_to_swap=0,
-                swap_io_components=False, size_mode="Shortest edge", scale_factor=2.0, long_edge=2048)
+                swap_io_components=False, size_mode="Shortest edge", scale_factor=2.0, long_edge=2048,
+                color_correction="lab", attention_mode="sdpa")
     args.update(overrides)
     return args
