@@ -11,7 +11,7 @@ import traceback
 from contextlib import contextmanager
 from dataclasses import dataclass, field
 from types import SimpleNamespace
-from typing import Callable, Dict, Iterator, List, Optional, Tuple
+from typing import Callable, Dict, Iterable, Iterator, List, Optional, Tuple
 
 import numpy as np
 import torch
@@ -98,24 +98,44 @@ class UpscaleInterrupted(Exception):
 
 
 @contextmanager
-def watching_module_calls(on_call: Callable[[torch.nn.Module], None]) -> Iterator[None]:
-    """Call `on_call(module)` before the forward of every torch module while the block runs. The pipeline checks
+def watching_modules(modules: Iterable[torch.nn.Module], on_call: Callable[[torch.nn.Module], None]) -> Iterator[None]:
+    """Call `on_call(module)` before the forward of each of `modules` while the block runs. The pipeline checks
     Interrupt only between images, and one image can spend minutes in the DiT or the tiled VAE; a check before each
-    module call stops it within one layer. Process-wide (torch's global hook): the DiT is loaded inside its phase, so
-    there is no model to put a hook on in advance. Always removed, so cached models and other code keep no hook."""
-    handle = torch.nn.modules.module.register_module_forward_pre_hook(lambda module, args: on_call(module))
+    of these calls stops it within a fraction of a second. Always removed, so cached models keep no hook."""
+    def hook(module, args) -> None:
+        on_call(module)  # nothing is returned: a pre-hook's return value would replace the module's inputs
+
+    handles = []
     try:
+        for module in modules:
+            handles.append(module.register_forward_pre_hook(hook))
         yield
     finally:
-        handle.remove()
+        for handle in handles:
+            handle.remove()
+
+
+def container_modules(model) -> List[torch.nn.Module]:
+    """The modules of `model` that hold other modules (blocks, stages), not the layers inside them: a check before
+    each runs a few hundred times per VAE tile or DiT pass, while one before every layer (or torch's process-wide
+    hook) runs millions of times and slowed a tiled VAE decode several times over. The vendored loaders keep these
+    objects when they load the weights (`load_state_dict(..., assign=True)`; GGUF swaps only the Linear layers), so
+    hooks set before a phase stay on the model the phase runs. An empty list for anything that is not a module."""
+    if not isinstance(model, torch.nn.Module):
+        return []
+    return [module for module in model.modules() if next(module.children(), None) is not None]
+
+
+def runner_dit(runner):
+    """The runner's DiT, unwrapped from the vendored fp8 / GGUF wrapper (`dit_model`), or None."""
+    model = getattr(runner, "dit", None)
+    return getattr(model, "dit_model", model)
 
 
 def dit_block_types(runner) -> Tuple[Tuple[type, ...], int]:
     """The classes of the DiT's transformer blocks and how many blocks one forward runs, or ((), 0) when the runner
-    holds no DiT with blocks. The DiT may sit inside the vendored fp8 / GGUF wrapper (`dit_model`)."""
-    model = getattr(runner, "dit", None)
-    model = getattr(model, "dit_model", model)
-    blocks = getattr(model, "blocks", None)
+    holds no DiT with blocks."""
+    blocks = getattr(runner_dit(runner), "blocks", None)
     try:
         return tuple({type(block) for block in blocks}), len(blocks)
     except TypeError:
@@ -167,7 +187,7 @@ class UpscaleRun:
         self._progress.batch_done(current, total)
 
     def module_called(self, module) -> None:
-        """Before every torch module's forward during the phases: Interrupt, and a DiT block moves the bar."""
+        """Before a watched module's forward during the phases: Interrupt, and a DiT block moves the bar."""
         self.check_interruption()
         if self._dit_blocks and isinstance(module, self._dit_blocks):
             self._progress.block_started()
@@ -277,7 +297,8 @@ class UpscaleRun:
 
         color_correction = options.color_correction.value
         tiled_note = '(Tiled)' if settings.use_tile_vae else ''
-        with watching_module_calls(self.module_called):
+        watched = container_modules(getattr(runner, "vae", None)) + container_modules(runner_dit(runner))
+        with watching_modules(watched, self.module_called):
             if not debug_mode: print(f"[SeedVR2] Phase 1/4: Encoding {tiled_note}...")
             self._progress.start_phase(ENCODE_PHASE)
             ctx = pipeline.encode_all_batches(runner, ctx=ctx, images=frames_tensor, debug=debug, batch_size=1,

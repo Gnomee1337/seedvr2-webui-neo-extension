@@ -12,7 +12,7 @@ from seedvr2_neo.memory_plan import build_memory_plan
 from seedvr2_neo.model_lifecycle import ModelLifecycle
 from seedvr2_neo.pipeline_options import AttentionMode, ColorCorrection, PipelineOptions
 from seedvr2_neo.upscale_run import INTERRUPTED_MESSAGE, HostHooks, UpscaleInterrupted, UpscaleRequest, UpscaleRun, \
-    attention_availability, dit_block_types, images_to_tensor, tensor_to_images
+    attention_availability, container_modules, dit_block_types, images_to_tensor, tensor_to_images
 from seedvr2_neo.upscale_settings import parse_upscale_settings
 
 
@@ -120,8 +120,27 @@ def test_the_progress_callback_raises_only_when_interrupted():
 # --- options, Interrupt inside a phase, progress ---
 
 class Block(torch.nn.Module):
+    """A transformer block: like the vendored ones, it holds layers of its own."""
+
+    def __init__(self):
+        super().__init__()
+        self.layer = torch.nn.Identity()
+
     def forward(self, x):
-        return x + 1
+        return self.layer(x) + 1
+
+
+class Vae(torch.nn.Module):
+    """A VAE whose decoder runs `tiles` times per decode, each through two stages."""
+
+    def __init__(self):
+        super().__init__()
+        self.decoder = torch.nn.Sequential(torch.nn.Sequential(torch.nn.Identity()),
+                                           torch.nn.Sequential(torch.nn.Identity()))
+
+    def decode(self, tiles):
+        for _ in range(tiles):
+            self.decoder(torch.zeros(1))
 
 
 class Dit(torch.nn.Module):
@@ -144,7 +163,9 @@ class ModelPipeline(Pipeline):
     def __init__(self, blocks=4, wrapped=False, on_block=None):
         super().__init__()
         self.dit = Dit(blocks)
-        self.runner = SimpleNamespace(dit=SimpleNamespace(dit_model=self.dit) if wrapped else self.dit)
+        self.vae = Vae()
+        self.runner = SimpleNamespace(dit=SimpleNamespace(dit_model=self.dit) if wrapped else self.dit, vae=self.vae)
+        self.on_decode = None  # runs before each decoded tile
         if on_block is not None:
             for block in self.dit.blocks:
                 block.register_forward_pre_hook(lambda module, args: on_block())
@@ -166,7 +187,10 @@ class ModelPipeline(Pipeline):
         return ctx
 
     def decode_all_batches(self, runner, ctx, progress_callback, **kwargs):
-        torch.nn.Identity()(torch.zeros(1))
+        for _ in range(3):
+            if self.on_decode is not None:
+                self.on_decode()
+            self.vae.decode(1)
         return ctx
 
     def postprocess_all_batches(self, ctx, progress_callback, **kwargs):
@@ -181,8 +205,11 @@ def make_tracked_run(pipeline, is_interrupted=lambda: False):
     return UpscaleRun(pipeline, ModelLifecycle(LoadedModelTracker(), lambda: None), hooks), reports
 
 
-def global_pre_hooks():
-    return len(torch.nn.modules.module._global_forward_pre_hooks)
+def hook_count(pipeline):
+    """Forward pre-hooks on every module of the pipeline's models and torch's process-wide ones."""
+    modules = list(pipeline.dit.modules()) + list(pipeline.vae.modules())
+    return (sum(len(module._forward_pre_hooks) for module in modules),
+            len(torch.nn.modules.module._global_forward_pre_hooks))
 
 
 def one_image():
@@ -245,29 +272,71 @@ def test_dit_blocks_move_the_progress_inside_the_upscale_phase(tmp_path, wrapped
     assert fractions == sorted(fractions)
 
 
-def test_no_global_hook_is_left_after_a_run_a_failure_or_an_interrupt(tmp_path):
-    before = global_pre_hooks()
-    make_tracked_run(ModelPipeline())[0].upscale_images(one_image(), make_request(tmp_path), False, False)
-    assert global_pre_hooks() == before
+def test_no_hook_is_left_on_the_models_after_a_run_a_failure_or_an_interrupt(tmp_path):
+    pipeline = ModelPipeline()
+    before = hook_count(pipeline)
+    make_tracked_run(pipeline)[0].upscale_images(one_image(), make_request(tmp_path), False, False)
+    assert hook_count(pipeline) == before
 
     def fail():
         raise RuntimeError("CUDA out of memory")
 
-    outcome = make_tracked_run(ModelPipeline(on_block=fail))[0].upscale_images(one_image(), make_request(tmp_path),
-                                                                               False, False)
+    pipeline = ModelPipeline(on_block=fail)
+    before = hook_count(pipeline)
+    outcome = make_tracked_run(pipeline)[0].upscale_images(one_image(), make_request(tmp_path), False, False)
     assert outcome.failure == "Runtime Error: RuntimeError"
-    assert global_pre_hooks() == before
+    assert hook_count(pipeline) == before
 
     pressed = []
-    run, _ = make_tracked_run(ModelPipeline(on_block=lambda: pressed.append(1)), is_interrupted=lambda: bool(pressed))
+    pipeline = ModelPipeline(on_block=lambda: pressed.append(1))
+    before = hook_count(pipeline)
+    run, _ = make_tracked_run(pipeline, is_interrupted=lambda: bool(pressed))
     assert run.upscale_images(one_image(), make_request(tmp_path), False, False).failure == INTERRUPTED_MESSAGE
-    assert global_pre_hooks() == before
+    assert hook_count(pipeline) == before
 
 
-def test_modules_outside_a_run_are_never_stopped(tmp_path):
-    run, _ = make_tracked_run(ModelPipeline(), is_interrupted=lambda: True)
+def test_only_container_modules_are_watched(tmp_path):
+    """Layers are not watched: a check before every layer slowed a real tiled decode several times over."""
+    pipeline = ModelPipeline(blocks=2)
+    seen = []
+    run, _ = make_tracked_run(pipeline)
+    original = run.module_called
+    run.module_called = lambda module: (seen.append(type(module).__name__), original(module))
     run.upscale_images(one_image(), make_request(tmp_path), False, False)
-    assert Dit(2)(torch.zeros(1)).item() == 2
+    assert "Identity" not in seen
+    assert seen.count("Block") == 2 and seen.count("Dit") == 1
+    assert seen.count("Sequential") == 3 * 3  # each of three tiles: the decoder and its two stages
+
+
+def test_interrupt_inside_the_decode_stops_before_the_next_tile(tmp_path):
+    pipeline = ModelPipeline()
+    pressed = []
+    tiles = []
+
+    def press_on_second_tile():
+        tiles.append(1)
+        if len(tiles) == 2:
+            pressed.append(1)
+
+    pipeline.on_decode = press_on_second_tile
+    run, _ = make_tracked_run(pipeline, is_interrupted=lambda: bool(pressed))
+    assert run.upscale_images(one_image(), make_request(tmp_path), False, False).failure == INTERRUPTED_MESSAGE
+    assert len(tiles) == 2
+
+
+def test_cached_models_are_not_stopped_after_the_run(tmp_path):
+    pipeline = ModelPipeline()
+    pressed = []
+    run, _ = make_tracked_run(pipeline, is_interrupted=lambda: bool(pressed))
+    run.upscale_images(one_image(), make_request(tmp_path), False, False)
+    pressed.append(1)
+    assert pipeline.dit(torch.zeros(1)).item() == 4
+    pipeline.vae.decode(1)
+
+
+@pytest.mark.parametrize("model", [None, SimpleNamespace(blocks=[]), "vae", 3])
+def test_anything_that_is_not_a_module_has_no_containers(model):
+    assert container_modules(model) == []
 
 
 @pytest.mark.parametrize("runner", [None, SimpleNamespace(), SimpleNamespace(dit=None),
