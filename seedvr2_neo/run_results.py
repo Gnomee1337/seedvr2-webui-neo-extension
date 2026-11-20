@@ -181,7 +181,7 @@ def finish_images(run_images: Sequence[RunImage], details: Sequence[InputDetails
     infotext also goes into the image, where Forge's gallery and API look for it when the image is not saved to disk."""
     reason = failure or NOT_UPSCALED_MESSAGE
     results = []
-    for run_image, input_details, image_params in zip(run_images, details, params):
+    for run_image, input_details, image_params in zip(run_images, details, params, strict=True):
         if not run_image.is_upscaled:
             image_params = failure_generation_params(image_params, reason)
         infotext = input_details.infotext.with_params(image_params)

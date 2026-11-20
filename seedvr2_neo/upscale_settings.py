@@ -63,7 +63,11 @@ class OutputTarget:
 
     resolution: int
     max_resolution: int
-    raised_to_minimum: bool  # the requested size was under the 512 px minimum of the shortest edge
+    raised_to_minimum: bool  # the shortest edge was raised above the requested size, towards the 512 px minimum
+
+    def raise_note(self) -> str:
+        """The note the console and the size line add when the shortest edge was raised, else an empty string."""
+        return f" (shortest edge raised to {self.resolution} px)" if self.raised_to_minimum else ""
 
     def output_size(self, size: Tuple[int, int]) -> Tuple[int, int]:
         """The (width, height) the pipeline gives an input of `size`: the shortest edge resized to `resolution`
@@ -101,22 +105,27 @@ class UpscaleSettings:
     def target_for(self, size: Tuple[int, int]) -> OutputTarget:
         """The output size of an input of `size` (width, height) in the chosen mode.
 
-        Shortest edge: `resolution` for every input. Scale factor and long edge: the input's own shortest edge times
-        the factor, or the shortest edge that gives the chosen long edge, never past `MAX_OUTPUT_LONG_EDGE` on the long
-        edge; a result under 512 px is raised to 512 (the model's smallest size here), so ×1 of a small input is
-        an upscale."""
+        Shortest edge: `resolution` for every input, the long edge capped at `MAX_LONG_EDGE_FACTOR` times it.
+        Scale factor and Long edge: the long edge is the factor times the input's, at most `MAX_OUTPUT_LONG_EDGE`, or
+        the chosen long edge; that cap is the pipeline's `max_resolution`, so no aspect ratio makes the output smaller
+        than asked. A shortest edge under 512 px (the slider's minimum) is raised towards 512, so ×1 of a small input
+        is an upscale, but only as far as the long edge stays within the cap: a very wide panorama keeps the cap."""
         if self.size_mode is SizeMode.SHORTEST_EDGE:
             return OutputTarget(self.resolution, self.resolution * MAX_LONG_EDGE_FACTOR, False)
         width, height = (max(1, int(side)) for side in size)
         shortest, longest = min(width, height), max(width, height)
         if self.size_mode is SizeMode.SCALE_FACTOR:
-            long_edge = min(self.scale_factor * longest, MAX_OUTPUT_LONG_EDGE)
+            cap = MAX_OUTPUT_LONG_EDGE
+            long_edge = min(self.scale_factor * longest, cap)
         else:
-            long_edge = self.long_edge
-        requested = round(long_edge * shortest / longest)
-        resolution = int(min(max(requested, RESOLUTION.minimum), RESOLUTION.maximum))
-        max_resolution = min(resolution * MAX_LONG_EDGE_FACTOR, MAX_OUTPUT_LONG_EDGE)
-        return OutputTarget(resolution, max_resolution, requested < RESOLUTION.minimum)
+            cap = long_edge = self.long_edge
+        requested = max(1, round(long_edge * shortest / longest))
+        # The largest shortest edge whose long edge still fits the cap; the raise to 512 stops there. It also keeps
+        # the pipeline's first resize (to the shortest edge, before the cap) from building a huge frame for a panorama.
+        fitting = max(1, math.floor(cap * shortest / longest))
+        resolution = requested if requested >= RESOLUTION.minimum else max(requested,
+                                                                           min(RESOLUTION.minimum, fitting))
+        return OutputTarget(int(resolution), int(cap), resolution > requested)
 
 
 def parse_upscale_settings(resolution: Any, input_noise: Any, latent_noise: Any, use_tile_vae: Any, tile_size: Any,

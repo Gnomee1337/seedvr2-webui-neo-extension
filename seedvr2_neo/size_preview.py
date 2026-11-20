@@ -25,10 +25,14 @@ def describe_output_size(source_size: Optional[Tuple[int, int]], resolution: Any
         return UNKNOWN_SOURCE_NOTE
     width, height = (int(side) for side in source_size)
     settings = parse_upscale_settings(resolution, None, None, None, None, None, size_mode, scale_factor, long_edge)
-    target = settings.target_for((width, height))
-    out_width, out_height = target.output_size((width, height))
-    raised = " (raised to the 512 px minimum)" if target.raised_to_minimum else ""
-    return f"Output size: **{out_width}×{out_height}** from {width}×{height}{raised}"
+    try:
+        target = settings.target_for((width, height))
+        out_width, out_height = target.output_size((width, height))
+    except OverflowError:  # only a hand-made request sends a side this large
+        return UNKNOWN_SOURCE_NOTE
+    if not (out_width and out_height):
+        return f"Output size: {width}×{height} is too thin to upscale (a side would be 0 px)"
+    return f"Output size: **{out_width}×{out_height}** from {width}×{height}{target.raise_note()}"
 
 
 def _is_usable_size(size: Any) -> bool:

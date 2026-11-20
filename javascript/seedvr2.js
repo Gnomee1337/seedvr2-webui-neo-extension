@@ -14,9 +14,15 @@ function seedvr2Img2imgPreview(...args) {
     return [...seedvr2Img2imgSourceSize(), ...args.slice(2)];
 }
 
-// Forge's DOM observer does not see an image replacing another (only childList changes are observed), so the size is
-// checked once a second and the hidden refresh button is pressed when it changes (new image, cleared image, other tab).
+// txt2img: the size line is made while the UI is built, before Forge applies the values saved in ui-config.json, so it
+// is refreshed once the page has them.
+// img2img: Forge's DOM observer does not see an image replacing another (only childList changes are observed), so the
+// size is checked once a second and the hidden refresh button is pressed when it changes (new image, cleared image,
+// other tab).
 onUiLoaded(function () {
+    const txt2imgButton = gradioApp().getElementById("seedvr2_txt2img_size_refresh");
+    if (txt2imgButton) txt2imgButton.click();
+
     let lastSize = null;
     setInterval(function () {
         const button = gradioApp().getElementById("seedvr2_img2img_size_refresh");

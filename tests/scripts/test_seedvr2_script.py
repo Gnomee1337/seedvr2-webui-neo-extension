@@ -409,7 +409,7 @@ def test_scale_factor_gives_each_input_size_its_own_resolution(script, pipeline,
     inputs = [Image.new("RGB", (512, 384)), Image.new("RGB", (1024, 768)), Image.new("RGB", (512, 384))]
     processed = run(script, make_img2img(inputs), size_mode="Scale factor", scale_factor=2)
     assert [(len(kwargs_pass), kwargs["resolution"], kwargs["max_resolution"])
-            for kwargs_pass, kwargs in zip(pipeline.passes, pipeline.generation_kwargs)] == [(2, 768, 3072),
+            for kwargs_pass, kwargs in zip(pipeline.passes, pipeline.generation_kwargs)] == [(2, 768, 3840),
                                                                                             (1, 1536, 3840)]
     assert ["SeedVR2 Resolution: 768" in processed.infotexts[0], "SeedVR2 Resolution: 1536" in processed.infotexts[1],
             "SeedVR2 Resolution: 768" in processed.infotexts[2]] == [True] * 3
@@ -428,7 +428,7 @@ def test_long_edge_mode_names_the_long_edge_and_keeps_it(script, pipeline):
 def test_small_input_raised_to_512_is_noted_in_the_console(script, pipeline, capsys):
     run(script, make_img2img([Image.new("RGB", (384, 384))]), size_mode="Scale factor", scale_factor=1)
     assert pipeline.generation_kwargs[0]["resolution"] == 512
-    assert "384x384 -> 512x512 (raised to the 512 px minimum)" in capsys.readouterr().out
+    assert "384x384 -> 512x512 (shortest edge raised to 512 px)" in capsys.readouterr().out
 
 
 @pytest.mark.parametrize("size_mode, scale_factor, long_edge", [("8K", 2, 2048), (None, "x", None), (3, -1, 10**9),
@@ -564,11 +564,31 @@ def test_img2img_preview_reads_the_image_size_in_the_browser(script):
     assert event["fn"](0, 0, 1080, "Scale factor", 1.5, 2048) == "Output size: depends on each input image"
 
 
-def test_img2img_refresh_button_id_matches_the_script_s_javascript(script_module):
+def test_refresh_button_ids_match_the_script_s_javascript(script_module):
     with open(os.path.join(REPO_ROOT, "javascript", "seedvr2.js"), encoding="utf-8") as js:
         source = js.read()
     assert f'"{script_module.IMG2IMG_SIZE_REFRESH_ID}"' in source
+    assert f'"{script_module.TXT2IMG_SIZE_REFRESH_ID}"' in source
     assert "function seedvr2Img2imgPreview" in source
+
+
+def test_txt2img_preview_is_refreshed_once_the_page_has_the_saved_values(script, script_module, monkeypatch):
+    """Forge applies ui-config.json after `ui()`, so the line made there may name the code defaults; the hidden button
+    the page presses on load recomputes it from the values the page really has."""
+    buttons = []
+    button_class = script_module.gr.Button
+
+    def recording_button(*args, **kwargs):
+        buttons.append(button_class(*args, **kwargs))
+        return buttons[-1]
+
+    monkeypatch.setattr(script_module.gr, "Button", recording_button)
+    forge = forge_txt2img_size_controls(script, script_module.gr)
+    note, ours = output_size_note(script, is_img2img=False)
+    refresh = next(button for button in buttons if button.kwargs.get("elem_id") == script_module.TXT2IMG_SIZE_REFRESH_ID)
+    event = refresh.events[0]
+    assert event["outputs"] == [note] and event["inputs"][:6] == list(forge.values())
+    assert "seedvr2-hidden" in refresh.kwargs["elem_classes"]
 
 
 def test_size_mode_is_not_saved_in_ui_config_so_it_always_matches_the_visible_slider(script):

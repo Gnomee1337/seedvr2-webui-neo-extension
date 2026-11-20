@@ -29,11 +29,13 @@ def mixed_inputs():
 
 
 def assert_clean_run(processed, pipeline, image_count, capped=True):
+    """No error, one size mode per infotext, and the pipeline got sizes inside the caps. In the capped modes a very wide
+    panorama may keep a shortest edge under 512: raising it further would pass the long edge cap."""
     assert len(processed.images) == len(processed.infotexts) == image_count
     assert not any("SeedVR2 Error" in infotext for infotext in processed.infotexts)
     assert all(infotext.count("SeedVR2 Size Mode: ") == 1 for infotext in processed.infotexts)
     for kwargs in pipeline.generation_kwargs:
-        assert 512 <= kwargs["resolution"] <= 3840
+        assert (1 if capped else 512) <= kwargs["resolution"] <= 3840
         if capped:
             assert kwargs["max_resolution"] <= 3840
 
@@ -44,9 +46,10 @@ def assert_clean_run(processed, pipeline, image_count, capped=True):
 @pytest.mark.parametrize("value", GARBAGE, ids=short_id)
 def test_garbage_in_one_size_argument_never_fails_the_run(script, pipeline, argument, value):
     base = {"size_mode": "Scale factor", "scale_factor": 2.0, "long_edge": 2048}
-    processed = script.run(make_img2img(mixed_inputs()), **run_args(**{**base, argument: value}))
+    # a fixed seed: a random one could itself contain "999"
+    processed = script.run(make_img2img(mixed_inputs()), **run_args(**{**base, argument: value, "seed": 42}))
     assert_clean_run(processed, pipeline, 5, capped=argument != "size_mode")
-    assert "999" not in "".join(processed.infotexts) and "Steps: 1" not in "".join(processed.infotexts)
+    assert "Steps: 999" not in "".join(processed.infotexts) and "Steps: 1" not in "".join(processed.infotexts)
 
 
 @pytest.mark.parametrize("value", GARBAGE, ids=short_id)
@@ -125,15 +128,16 @@ def test_the_txt2img_tab_and_the_img2img_tab_scripts_keep_their_own_size_sources
         img2img.after_component(gr.Slider(value=512, elem_id=elem_id), elem_id=elem_id)
     assert txt2img._txt2img_preview_inputs([]) is not None
     assert img2img._txt2img_preview_inputs([]) is None
-    assert not hasattr(script_module.Script(), "_txt2img_size_sources")
+    assert script_module.Script()._txt2img_size_sources == {}
 
 
 @pytest.mark.parametrize("kwargs", [{}, {"elem_id": None}, {"elem_id": ""}, {"elem_id": 5}, {"elem_id": "txt2img"},
-                                    {"elem_id": "TXT2IMG_WIDTH"}, {"elem_id": "txt2img_width "}])
+                                    {"elem_id": "TXT2IMG_WIDTH"}, {"elem_id": "txt2img_width "},
+                                    {"elem_id": ["txt2img_width"]}, {"elem_id": "txt2img_hr"}])
 def test_components_that_are_not_forge_s_size_controls_are_ignored(script, kwargs):
     gr = sys.modules["gradio"]
     script.after_component(gr.Slider(value=1, **kwargs), **kwargs)
-    assert script._size_sources() == {}
+    assert script._txt2img_size_sources == {}
 
 
 def test_a_rebuilt_ui_uses_the_newest_forge_controls(script):

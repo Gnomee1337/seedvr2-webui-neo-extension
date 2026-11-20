@@ -5,6 +5,10 @@ from any image an API caller uploads. Whatever arrives, the settings stay inside
 size the run gets for an input is a real image size: both sides positive and even, the long edge at most
 `MAX_OUTPUT_LONG_EDGE` in the scale factor and long edge modes.
 
+A shortest edge under 512 px is raised towards 512 only while the long edge stays within the mode's cap, so a very wide
+panorama keeps the cap and a shortest edge under 512. Past an aspect ratio of about cap / 2 (1920:1 at 3840) the short
+side rounds to 0 px: such an image cannot be upscaled, the run returns it with `SeedVR2 Error` and the preview says so.
+
 `OutputTarget.output_size` is also checked against the vendored `SideResize` the pipeline really resizes with, so the
 size the run plans (pass budget, console line, preview) is the size it gets.
 """
@@ -33,10 +37,8 @@ SIZES = [(1, 1), (1, 2), (2, 1), (7, 3), (64, 64), (384, 384), (511, 513), (512,
          (1024, 4096), (4096, 1024), (4097, 1024), (1920, 1080), (3840, 2160), (2160, 3840), (5000, 4999),
          (8192, 8192), (20000, 20000), (12, 4096), (4096, 12), (1, 1300), (1300, 1)]
 
-# Aspect ratios past ~1365:1 (the 512 px shortest edge scaled down to fit a 2048 px long edge rounds to 0 or 1 px).
-ZERO_EDGE_SIZES = [(1, 4096), (4096, 1), (2, 3000), (3000, 2), (1, 1400), (16000, 10)]
-# The shortest edge mode caps the long edge at 4 x 1080 = 4320 px instead, so it gets a 0 px side only past ~2900:1.
-ZERO_EDGE_CASES = [(mode, size) for mode in (SizeMode.SCALE_FACTOR, SizeMode.LONG_EDGE) for size in ZERO_EDGE_SIZES] +     [(SizeMode.SHORTEST_EDGE, size) for size in [(1, 4096), (4096, 1)]]
+# Aspect ratios so extreme that the short output side rounds to 0 px in every mode at the default settings.
+ZERO_EDGE_SIZES = [(1, 4096), (4096, 1), (1, 20000), (3, 20000)]
 
 MODES = list(SizeMode)
 
@@ -48,6 +50,20 @@ def short_id(value):
 
 def settings(mode, scale_factor=2.0, long_edge=2048, resolution=1080):
     return parse_upscale_settings(resolution, 0.0, 0.0, True, 512, 128, mode, scale_factor, long_edge)
+
+
+def cap_of(parsed):
+    """The longest output edge the mode allows: the pipeline's `max_resolution` for this target."""
+    if parsed.size_mode is SizeMode.SCALE_FACTOR:
+        return MAX_OUTPUT_LONG_EDGE
+    if parsed.size_mode is SizeMode.LONG_EDGE:
+        return parsed.long_edge
+    return parsed.resolution * MAX_LONG_EDGE_FACTOR
+
+
+def zero_side_possible(parsed, size):
+    """The short output side is under 2 px (0 after the even rounding) only when the long edge cap leaves no room."""
+    return cap_of(parsed) * max(1, min(size)) / max(1, max(size)) < 2 + 1e-9
 
 
 def all_settings():
@@ -121,23 +137,36 @@ def test_every_mode_gives_a_real_even_size_inside_the_caps(size):
     for parsed in all_settings():
         target = parsed.target_for(size)
         width, height = target.output_size(size)
-        assert width > 0 and height > 0, (parsed.size_mode, size, (width, height))
+        assert (width > 0 and height > 0) or zero_side_possible(parsed, size), (parsed.size_mode, size, (width, height))
         assert width % 2 == 0 and height % 2 == 0
-        assert RESOLUTION.minimum <= target.resolution <= RESOLUTION.maximum
+        assert target.max_resolution == cap_of(parsed)
         assert max(width, height) <= target.max_resolution
+        assert 1 <= target.resolution <= RESOLUTION.maximum
         if parsed.size_mode is SizeMode.SHORTEST_EDGE:
-            assert target.max_resolution == target.resolution * MAX_LONG_EDGE_FACTOR
+            assert target.resolution >= RESOLUTION.minimum
         else:
             assert max(width, height) <= MAX_OUTPUT_LONG_EDGE
         assert target.output_pixels(size) == width * height
 
 
-@pytest.mark.xfail(strict=True, reason="BUG: past ~1365:1 the planned output has a 0 px side (1x4096 -> 0x2048); the "
-                                       "vendored SideResize then raises, so the run ends with 'SeedVR2 Error'")
-@pytest.mark.parametrize("mode, size", ZERO_EDGE_CASES)
-def test_extreme_aspect_ratios_never_give_a_zero_side(mode, size):
-    width, height = settings(mode).target_for(size).output_size(size)
-    assert width > 0 and height > 0
+@pytest.mark.parametrize("size", SIZES)
+def test_a_shortest_edge_under_512_only_where_the_long_edge_cap_leaves_no_room(size):
+    for parsed in all_settings():
+        if parsed.size_mode is SizeMode.SHORTEST_EDGE:
+            continue
+        target = parsed.target_for(size)
+        if target.resolution < RESOLUTION.minimum:
+            # raising further would push the long edge past the cap
+            assert target.resolution * max(size) / min(size) >= cap_of(parsed) - max(size) / min(size) - 2, \
+                (parsed.size_mode, size, target)
+
+
+@pytest.mark.parametrize("mode, size", [(mode, size) for mode in MODES for size in ZERO_EDGE_SIZES])
+def test_a_zero_side_happens_only_when_the_cap_leaves_under_two_pixels(mode, size):
+    parsed = settings(mode)
+    width, height = parsed.target_for(size).output_size(size)
+    if width == 0 or height == 0:
+        assert zero_side_possible(parsed, size)
 
 
 @pytest.mark.parametrize("size", SIZES + ZERO_EDGE_SIZES)
@@ -156,28 +185,34 @@ def test_output_orientation_follows_the_input(size):
 def test_zero_or_negative_sides_are_read_as_one_pixel(size):
     for parsed in all_settings():
         target = parsed.target_for(size)
-        assert RESOLUTION.minimum <= target.resolution <= RESOLUTION.maximum
+        assert 1 <= target.resolution <= RESOLUTION.maximum
         clean = tuple(max(1, side) for side in size)
+        assert target == parsed.target_for(clean)
         assert target.output_size(size) == target.output_size(clean)
 
 
 @pytest.mark.parametrize("size, scale_factor", [((384, 384), 1.0), ((100, 300), 1.0), ((200, 100), 2.0),
                                                 ((1, 1), 4.0)])
-def test_raised_flag_is_set_only_when_the_shortest_edge_is_raised(size, scale_factor):
+def test_raised_flag_is_set_when_the_shortest_edge_is_raised_to_512(size, scale_factor):
     target = settings("Scale factor", scale_factor=scale_factor).target_for(size)
     assert target.raised_to_minimum
     assert min(target.output_size(size)) == RESOLUTION.minimum
 
 
-@pytest.mark.xfail(strict=True, reason="BUG: a panorama past 4:1 whose shortest edge is 'raised to 512' is then scaled "
-                                       "down by the 4x long edge cap: 16000x1000 at x2 -> 2048x128, while the console, "
-                                       "preview and infotext say 512 / 'raised to the 512 px minimum'")
 @pytest.mark.parametrize("mode, size", [("Scale factor", (16000, 1000)), ("Scale factor", (8000, 1000)),
-                                        ("Long edge", (1000, 16000)), ("Long edge", (5000, 600))])
-def test_a_raised_shortest_edge_is_really_at_least_512(mode, size):
+                                        ("Long edge", (1000, 16000)), ("Long edge", (5000, 600)),
+                                        ("Scale factor", (100, 1000))])
+def test_a_raise_stopped_by_the_long_edge_cap_names_the_real_shortest_edge(mode, size):
+    """16000x1000 at x1 cannot reach a 512 px shortest edge within 3840 px: it keeps the cap, and a raise, when there
+    is one, names the shortest edge it really reached."""
     target = settings(mode, scale_factor=1.0, long_edge=2048).target_for(size)
-    assert target.raised_to_minimum
-    assert min(target.output_size(size)) >= RESOLUTION.minimum
+    out = target.output_size(size)
+    assert max(out) <= target.max_resolution
+    if target.raised_to_minimum:
+        assert f"raised to {target.resolution} px" in target.raise_note()
+        assert abs(min(out) - target.resolution) <= 2
+    else:
+        assert target.raise_note() == ""
 
 
 def test_the_shortest_edge_mode_never_reports_a_raise():
@@ -209,16 +244,14 @@ def test_a_larger_scale_factor_never_gives_a_smaller_image():
         assert all(a[0] <= b[0] and a[1] <= b[1] for a, b in zip(sizes, sizes[1:])), size
 
 
-def test_long_edge_mode_never_exceeds_the_chosen_long_edge_unless_the_shortest_edge_is_raised():
-    """A raise to 512 px may pass the chosen long edge (1920x800 at 1024 -> 1228x512): that is the documented minimum,
-    and the console and preview name the raise. The long edge stays within the 4 x 512 cap then."""
+def test_long_edge_mode_never_exceeds_the_chosen_long_edge():
+    """The chosen long edge is the pipeline's cap, so even a raise towards 512 px stops at it."""
     rng = random.Random(5)
     for _ in range(3000):
         size = (rng.randint(1, 9000), rng.randint(1, 9000))
         long_edge = rng.randrange(1024, 3841, 64)
         target = settings("Long edge", long_edge=long_edge).target_for(size)
-        limit = RESOLUTION.minimum * MAX_LONG_EDGE_FACTOR if target.raised_to_minimum else long_edge
-        assert max(target.output_size(size)) <= max(limit, long_edge), (size, long_edge)
+        assert max(target.output_size(size)) <= long_edge, (size, long_edge)
 
 
 def test_a_larger_long_edge_never_gives_a_smaller_image():
@@ -232,13 +265,12 @@ def test_random_inputs_and_settings_never_break_the_caps():
     rng = random.Random(1234)
     for _ in range(5000):
         size = (rng.choice([1, 2, 3, rng.randint(1, 20000)]), rng.randint(1, 20000))
-        if max(size) / min(size) > 1000:  # the zero side past ~1365:1 is the xfail above
-            continue
         parsed = settings(rng.choice(MODES + ["garbage", None]), rng.uniform(-10, 10), rng.uniform(0, 10_000),
                           rng.uniform(0, 10_000))
         target = parsed.target_for(size)
         width, height = target.output_size(size)
-        assert width > 0 and height > 0 and width % 2 == 0 and height % 2 == 0
+        assert width % 2 == 0 and height % 2 == 0
+        assert (width > 0 and height > 0) or zero_side_possible(parsed, size), (parsed.size_mode, size)
         if parsed.size_mode is not SizeMode.SHORTEST_EDGE:
             assert max(width, height) <= MAX_OUTPUT_LONG_EDGE
 

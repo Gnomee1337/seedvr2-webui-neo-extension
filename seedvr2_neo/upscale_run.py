@@ -101,8 +101,7 @@ def describe_target(size: Tuple[int, int], target: OutputTarget, count: int) -> 
     width, height = size
     out_width, out_height = target.output_size(size)
     images = "image" if count == 1 else "images"
-    raised = f" (raised to the {target.resolution} px minimum)" if target.raised_to_minimum else ""
-    return f"[SeedVR2] {count} {images} {width}x{height} -> {out_width}x{out_height}{raised}"
+    return f"[SeedVR2] {count} {images} {width}x{height} -> {out_width}x{out_height}{target.raise_note()}"
 
 
 class UpscaleRun:

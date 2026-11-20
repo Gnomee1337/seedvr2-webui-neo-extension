@@ -24,7 +24,7 @@ def test_the_preview_matches_the_run_cap_at_3840():
 
 def test_a_raise_to_512_is_named():
     assert sp.describe_output_size((384, 384), 1080, "Scale factor", 1, 2048) == \
-        "Output size: **512×512** from 384×384 (raised to the 512 px minimum)"
+        "Output size: **512×512** from 384×384 (shortest edge raised to 512 px)"
 
 
 @pytest.mark.parametrize("size", [None, (0, 0), (512, 0), (-1, 512), ("a", 512), (512,), "512x384", (float("nan"), 1),

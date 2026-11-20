@@ -24,6 +24,13 @@ def short_id(value):
     return repr(value)[:40]
 
 
+def expected_line_part(size, width, height):
+    """What the preview must say for a run output of width x height: the size, or that the image is too thin."""
+    if width and height:
+        return f"**{width}×{height}** from {size[0]}×{size[1]}"
+    return "too thin to upscale"
+
+
 def run_output_size(size, resolution, size_mode, scale_factor, long_edge):
     """The size the run gives an input of `size` with these raw values: the same parse and target the run uses."""
     settings = parse_upscale_settings(resolution, 0.0, 0.0, True, 512, 128, size_mode, scale_factor, long_edge)
@@ -47,9 +54,6 @@ def test_garbage_as_the_source_width_or_height_gives_a_line(value):
         assert line.startswith("Output size:") and "\n" not in line
 
 
-@pytest.mark.xfail(strict=True, raises=OverflowError,
-                   reason="BUG: a source size past ~1e308 / extreme ratio reaches int/int true division in "
-                          "OutputTarget.output_size and raises OverflowError inside the Gradio event")
 @pytest.mark.parametrize("size", [(1e308, 1), (1, 1e308), (10 ** 400, 1), (1, 10 ** 309)], ids=short_id)
 def test_huge_source_sizes_do_not_raise(size):
     assert sp.describe_output_size(size, 1080, "Scale factor", 2, 2048).startswith("Output size:")
@@ -76,7 +80,7 @@ def test_the_preview_names_the_size_the_run_gives_for_random_values():
                   rng.choice([rng.uniform(0, 6), rng.choice(choices)]),
                   rng.choice([rng.uniform(0, 5000), rng.choice(choices)])]
         width, height = run_output_size(size, *values)
-        assert f"**{width}×{height}** from {size[0]}×{size[1]}" in sp.describe_output_size(size, *values), (size, values)
+        assert expected_line_part(size, width, height) in sp.describe_output_size(size, *values), (size, values)
 
 
 @pytest.mark.parametrize("mode", MODES)
@@ -85,32 +89,36 @@ def test_the_preview_names_the_size_the_run_gives_for_random_values():
 def test_extreme_sources_are_previewed_like_the_run(mode, size):
     width, height = run_output_size(size, 1080, mode, 4, 3840)
     line = sp.describe_output_size(size, 1080, mode, 4, 3840)
-    assert f"**{width}×{height}**" in line
+    assert expected_line_part(size, width, height) in line
     if mode != SizeMode.SHORTEST_EDGE.value:
         assert max(width, height) <= MAX_OUTPUT_LONG_EDGE
 
 
-@pytest.mark.xfail(strict=True, reason="BUG: past ~1365:1 the preview names a 0 px side ('**0×2048** from 1×4096'); "
-                                       "the run then fails in the vendored resize")
 @pytest.mark.parametrize("mode", ["Scale factor", "Long edge"])
 @pytest.mark.parametrize("size", [(1, 4096), (4096, 1), (2, 3000)])
 def test_the_preview_never_names_a_zero_side(mode, size):
     line = sp.describe_output_size(size, 1080, mode, 2, 2048)
     assert "**0×" not in line and "×0**" not in line
+    if "**" not in line:
+        assert "too thin to upscale" in line
 
 
-@pytest.mark.xfail(strict=True, reason="BUG: the preview says '(raised to the 512 px minimum)' for a panorama past 4:1 "
-                                       "whose output shortest edge is then scaled down below 512 (16000x1000 -> 2048x128)")
-def test_a_named_raise_means_a_512_px_shortest_edge():
-    line = sp.describe_output_size((16000, 1000), 1080, "Scale factor", 2, 2048)
-    assert "raised to the 512 px minimum" not in line or "**2048×512**" in line
+@pytest.mark.parametrize("size", [(16000, 1000), (100, 1000), (384, 384), (100, 300)])
+def test_a_named_raise_names_the_shortest_edge_the_run_gives(size):
+    line = sp.describe_output_size(size, 1080, "Scale factor", 1, 2048)
+    target = parse_upscale_settings(1080, 0, 0, True, 512, 128, "Scale factor", 1, 2048).target_for(size)
+    if target.raised_to_minimum:
+        assert f"raised to {target.resolution} px" in line
+        assert abs(min(target.output_size(size)) - target.resolution) <= 2
+    else:
+        assert "raised" not in line
 
 
 def test_a_raise_is_named_only_when_the_run_raises():
     for size in [(384, 384), (100, 300), (512, 512), (1920, 1080), (256, 1024)]:
         for mode in MODES:
             settings = parse_upscale_settings(1080, 0, 0, True, 512, 128, mode, 1.0, 1024)
-            named = "raised to the 512 px minimum" in sp.describe_output_size(size, 1080, mode, 1.0, 1024)
+            named = "raised to" in sp.describe_output_size(size, 1080, mode, 1.0, 1024)
             assert named == settings.target_for(size).raised_to_minimum, (size, mode)
 
 

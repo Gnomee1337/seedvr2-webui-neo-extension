@@ -133,12 +133,37 @@ def test_factor_4_on_a_tall_image_is_capped_at_3840_on_the_long_edge():
 
 
 @pytest.mark.parametrize("settings, size", [(factor(1), (512, 384)), (factor(1.2), (384, 384)),
-                                            (long_edge(1024), (1024, 256))])
+                                            (factor(4), (100, 100))])
 def test_outputs_under_512_are_raised_to_512_and_flagged(settings, size):
     target = settings.target_for(size)
 
     assert target.resolution == 512 and target.raised_to_minimum
     assert min(target.output_size(size)) == 512
+
+
+@pytest.mark.parametrize("settings, size, expected", [
+    (long_edge(1024), (1024, 256), (1024, 256)),  # 512 would make the long edge 2048, past the chosen 1024
+    (factor(2), (4096, 512), (3840, 480)),  # the 3840 cap wins over the factor and over the 512 minimum
+    (factor(2), (2048, 448), (3840, 840)),  # wider than 4:1 keeps the full long edge
+    (factor(1), (600, 3600), (600, 3600)),  # x1 of a tall image is not made smaller
+    (long_edge(3840), (768, 3840), (768, 3840)),
+])
+def test_wide_panoramas_get_the_long_edge_cap_not_a_smaller_image(settings, size, expected):
+    target = settings.target_for(size)
+
+    assert target.output_size(size) == expected
+    assert target.raise_note() == ""
+
+
+def test_the_long_edge_mode_never_raises_since_its_cap_is_the_chosen_long_edge():
+    assert not long_edge(1024).target_for((1024, 256)).raised_to_minimum
+
+
+def test_a_raise_stopped_by_the_cap_names_the_edge_it_reached():
+    target = factor(1).target_for((100, 1000))
+
+    assert target.output_size((100, 1000)) == (384, 3840)
+    assert target.raise_note() == " (shortest edge raised to 384 px)"
 
 
 def test_an_output_of_512_or_more_is_not_flagged():

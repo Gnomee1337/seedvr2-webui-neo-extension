@@ -138,7 +138,7 @@ def test_the_console_line_names_the_planned_size(mode, size):
     line = describe_target(size, target, 3)
     out_w, out_h = target.output_size(size)
     assert line.startswith("[SeedVR2] 3 images ") and f"{size[0]}x{size[1]} -> {out_w}x{out_h}" in line
-    assert ("raised to the 512 px minimum" in line) == target.raised_to_minimum
+    assert ("raised to" in line) == target.raised_to_minimum
     assert "\n" not in line
 
 
