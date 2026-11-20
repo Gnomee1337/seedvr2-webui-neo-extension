@@ -31,13 +31,31 @@ from seedvr2_neo.run_inputs import is_unusable_seed, resolve_seed, select_distin
 from seedvr2_neo.run_results import InputDetails, RunImage, SavePlan, describe_generated_inputs, \
     describe_uploaded_inputs, finish_images, merge_run_images, not_upscaled_comment, plan_saving, read_option, \
     seedvr2_generation_params
+from seedvr2_neo.size_preview import DEFAULT_RES_STEP, UNKNOWN_SOURCE_NOTE, describe_output_size, txt2img_final_size
 from seedvr2_neo.upscale_run import INTERRUPTED_MESSAGE, HostHooks, UpscaleRequest, UpscaleRun, import_pipeline
-from seedvr2_neo.upscale_settings import NOISE, RESOLUTION, TILE_OVERLAP, TILE_SIZE, USE_TILE_VAE_DEFAULT, Bounds, \
+from seedvr2_neo.upscale_settings import DEFAULT_SIZE_MODE, FALLBACK_SIZE_MODE, LONG_EDGE, MAX_OUTPUT_LONG_EDGE, NOISE, RESOLUTION, \
+    SCALE_FACTOR, TILE_OVERLAP, TILE_SIZE, USE_TILE_VAE_DEFAULT, Bounds, SizeMode, parse_size_mode, \
     parse_upscale_settings
 
 # File name suffixes of the saved upscaled image and of the extra copy of the image before the upscale.
 RESULT_SUFFIX = "-seedvr2"
 ORIGINAL_SUFFIX = "-original"
+
+# The quick buttons next to the scale factor slider.
+QUICK_SCALE_FACTORS = (1.5, 2.0, 4.0)
+
+# Forge's txt2img controls (by elem_id) that decide the size of the image the upscale gets. The Hires. fix flag is the
+# hidden checkbox of an InputAccordion, which appends "-checkbox" to its elem_id.
+TXT2IMG_SIZE_SOURCES = {
+    "txt2img_width": "width", "txt2img_height": "height", "txt2img_hr-checkbox": "enable_hr",
+    "txt2img_hr_scale": "hr_scale", "txt2img_hr_resize_x": "hr_resize_x", "txt2img_hr_resize_y": "hr_resize_y",
+}
+TXT2IMG_SOURCE_ORDER = ("width", "height", "enable_hr", "hr_scale", "hr_resize_x", "hr_resize_y")
+# The hidden buttons `javascript/seedvr2.js` presses: once after the page loads in txt2img (Forge applies the values
+# saved in ui-config.json after the UI is built, so the line made in `ui()` may name other sizes), and in img2img
+# whenever the input image changes size.
+TXT2IMG_SIZE_REFRESH_ID = "seedvr2_txt2img_size_refresh"
+IMG2IMG_SIZE_REFRESH_ID = "seedvr2_img2img_size_refresh"
 
 # Forge options the script reads itself (with the request's `override_settings`).
 SAMPLES_SAVE_OPTION = "samples_save"
@@ -53,6 +71,19 @@ def scan_seedvr2_models() -> ModelScan:
 def slider_range(bounds: Bounds) -> Dict[str, float]:
     """Gradio slider arguments from the bounds `parse_upscale_settings` also enforces on API values."""
     return {"minimum": bounds.minimum, "maximum": bounds.maximum, "step": bounds.step, "value": bounds.default}
+
+
+def preview_txt2img_output_size(width, height, enable_hr, hr_scale, hr_resize_x, hr_resize_y, resolution, size_mode,
+                                scale_factor, long_edge) -> str:
+    """The output size line for txt2img: the upscale of the image Forge will make (after Hires. fix when it is on)."""
+    source = txt2img_final_size(width, height, enable_hr, hr_scale, hr_resize_x, hr_resize_y,
+                                getattr(shared.opts, "res_step", DEFAULT_RES_STEP))
+    return describe_output_size(source, resolution, size_mode, scale_factor, long_edge)
+
+
+def preview_img2img_output_size(width, height, resolution, size_mode, scale_factor, long_edge) -> str:
+    """The output size line for img2img; `width` and `height` come from the browser, 0 when there is no image."""
+    return describe_output_size((width, height), resolution, size_mode, scale_factor, long_edge)
 
 
 def empty_result(p, message: str) -> Processed:
@@ -126,7 +157,7 @@ def save_originals(p, inputs: List[Image.Image], details: List[InputDetails]) ->
         save_result_image(p, image, index, input_details, input_details.infotext.with_params({}), ORIGINAL_SUFFIX)
 
 
-def build_result(p, run_images: List[RunImage], details: List[InputDetails], params: Mapping[str, Any],
+def build_result(p, run_images: List[RunImage], details: List[InputDetails], params: List[Mapping[str, Any]],
                  failure: Optional[str], result_seed: int, save_plan: SavePlan) -> Processed:
     """Forge's result: one image and one infotext per input. Upscaled images are saved by the user's settings; when
     some are not upscaled, the result gets a comment saying so."""
@@ -142,6 +173,11 @@ def build_result(p, run_images: List[RunImage], details: List[InputDetails], par
 
 
 class Script(scripts.Script):
+    def __init__(self):
+        super().__init__()
+        # Forge's txt2img size controls by name (`TXT2IMG_SIZE_SOURCES`), seen in `after_component`.
+        self._txt2img_size_sources: Dict[str, Any] = {}
+
     def title(self):
         return "SeedVR2 Native Upscaler (24G)"
 
@@ -149,6 +185,19 @@ class Script(scripts.Script):
         return True
 
     def ui(self, is_img2img):
+        # Layout only: Forge keys saved values (ui-config.json) by label, not by the rows or accordions around a
+        # control, and run() gets the controls in the order of the list returned below, not in the order shown.
+        dit_model, vae_model = self._model_controls()
+        size_mode, resolution, scale_factor, long_edge = self._size_controls(is_img2img)
+        after_run, unload_sd, blocks_to_swap, swap_io_components = self._memory_controls()
+        (seed, save_original, force_reload, debug_mode, input_noise, latent_noise, use_tile_vae, tile_size,
+         tile_overlap) = self._advanced_controls()
+        return [dit_model, vae_model, seed, resolution, input_noise, latent_noise, force_reload, unload_sd, save_original,
+                use_tile_vae, tile_size, tile_overlap, debug_mode, after_run, blocks_to_swap, swap_io_components,
+                size_mode, scale_factor, long_edge]
+
+    def _model_controls(self):
+        """The DiT and VAE dropdowns with the rescan button and the notes under them."""
         scan = scan_seedvr2_models()
         missing_note = describe_missing_models(scan)
         vram_warning = describe_vram_warning(scan, scan.default_dit)
@@ -163,46 +212,138 @@ class Script(scripts.Script):
         refresh_models.click(fn=self._refresh_models, inputs=[dit_model, vae_model],
                              outputs=[dit_model, vae_model, missing_models_note])
         dit_model.change(fn=self._update_vram_warning, inputs=[dit_model], outputs=[vram_warning_note])
+        return dit_model, vae_model
 
-        with gr.Row():
-            seed = gr.Number(label="Seed (-1 = Random/Follow)", value=-1, precision=0)
-            resolution = gr.Slider(label="Upscale Resolution (Shortest Edge)", **slider_range(RESOLUTION))
+    def _size_controls(self, is_img2img):
+        """The output size group: the mode, the control of each mode (only the chosen one shown) and the size line."""
+        with gr.Group(elem_classes=["seedvr2-section"]):
+            size_mode = gr.Radio(label="Output Size Mode", choices=[mode.value for mode in SizeMode],
+                                 value=DEFAULT_SIZE_MODE.value,
+                                 info=f"Scale factor and Long edge keep the long edge at most {MAX_OUTPUT_LONG_EDGE} "
+                                      f"px; Scale factor raises small images towards {RESOLUTION.minimum} px")
+            # Forge would apply a mode saved in ui-config.json after the UI is built, while the visible slider column
+            # comes from the code default: the radio and the slider would disagree. So the mode always starts at the
+            # code default and is never saved; the sliders keep their saved values.
+            size_mode.do_not_save_to_config = True
+            # Only the active mode's control is shown. The shortest edge slider keeps its old label so the values
+            # users saved still apply.
+            with gr.Column(visible=DEFAULT_SIZE_MODE is SizeMode.SCALE_FACTOR) as scale_factor_controls:
+                with gr.Row(elem_classes=["seedvr2-quick-scale-row"]):
+                    scale_factor = gr.Slider(label="Scale Factor", scale=1, **slider_range(SCALE_FACTOR))
+                    for factor in QUICK_SCALE_FACTORS:
+                        gr.Button(value=f"×{factor:g}", size="sm", scale=0, min_width=56,
+                                  elem_classes=["seedvr2-quick-scale"]).click(fn=lambda factor=factor: factor,
+                                                                              inputs=[], outputs=[scale_factor])
+            with gr.Column(visible=DEFAULT_SIZE_MODE is SizeMode.SHORTEST_EDGE) as shortest_edge_controls:
+                resolution = gr.Slider(label="Upscale Resolution (Shortest Edge)", **slider_range(RESOLUTION))
+            with gr.Column(visible=DEFAULT_SIZE_MODE is SizeMode.LONG_EDGE) as long_edge_controls:
+                long_edge = gr.Slider(label="Output Long Edge (px)", **slider_range(LONG_EDGE))
+            size_controls = [resolution, size_mode, scale_factor, long_edge]
+            txt2img_inputs = None if is_img2img else self._txt2img_preview_inputs(size_controls)
+            output_size_note = gr.Markdown(
+                UNKNOWN_SOURCE_NOTE if txt2img_inputs is None
+                else preview_txt2img_output_size(*(component.value for component in txt2img_inputs)),
+                elem_classes=["seedvr2-size-note"])
+        mode_controls = {SizeMode.SCALE_FACTOR: scale_factor_controls, SizeMode.SHORTEST_EDGE: shortest_edge_controls,
+                         SizeMode.LONG_EDGE: long_edge_controls}
+        size_mode.change(fn=self._show_size_controls, inputs=[size_mode],
+                         outputs=[mode_controls[mode] for mode in SizeMode])
+        if is_img2img:
+            self._preview_img2img_output_size(output_size_note, size_controls)
+        elif txt2img_inputs is not None:
+            self._preview_txt2img_output_size(output_size_note, txt2img_inputs)
+        return size_mode, resolution, scale_factor, long_edge
 
-        with gr.Row():
-            unload_sd = gr.Checkbox(label="Unload SD Checkpoint", value=True, elem_classes="force-unload",
-                                    info="Frees VRAM; the checkpoint reloads on the next generation")
-            save_original = gr.Checkbox(label="Save Extra Copy of Original", value=False,
-                                        info="img2img: also saves the input image; txt2img images are saved by Forge")
-            force_reload = gr.Checkbox(label="Force Reload", value=False)
-            debug_mode = gr.Checkbox(label="Show Debug Logs", value=False)
-
+    @staticmethod
+    def _memory_controls():
+        """After run and the SD unload, then BlockSwap: on the main screen, since 7B on a small GPU needs them."""
         with gr.Row():
             after_run = gr.Radio(label="After run", choices=[option.value for option in AfterRun],
                                  value=AfterRun.UNLOAD.value,
                                  info="Unload frees VRAM and RAM; Keep in RAM makes the next run start faster but "
                                       "holds RAM the size of the model files")
+            unload_sd = gr.Checkbox(label="Unload SD Checkpoint", value=True, elem_classes="force-unload",
+                                    info="Frees VRAM; the checkpoint reloads on the next generation")
+        with gr.Row():
             blocks_to_swap = gr.Slider(label="BlockSwap: DiT blocks kept in RAM", minimum=0,
                                        maximum=MAX_BLOCKS_TO_SWAP, step=1, value=0)
             swap_io_components = gr.Checkbox(label="BlockSwap: I/O layers too", value=False,
                                              info="Turns BlockSwap on even with 0 blocks; saves little VRAM")
+        return after_run, unload_sd, blocks_to_swap, swap_io_components
 
-        with gr.Accordion("Advanced Settings (Noise & Tiling)", open=False):
+    @staticmethod
+    def _advanced_controls():
+        """The settings changed rarely: seed, extra saving, reload and logs, noise, VAE tiling."""
+        with gr.Accordion("Advanced Settings", open=False):
+            with gr.Row():
+                seed = gr.Number(label="Seed (-1 = Random/Follow)", value=-1, precision=0)
+                save_original = gr.Checkbox(label="Save Extra Copy of Original", value=False,
+                                            info="img2img: also saves the input image; txt2img images are saved by "
+                                                 "Forge")
+                force_reload = gr.Checkbox(label="Force Reload", value=False,
+                                           info="Reads the model files again; matters only with Keep in RAM")
+                debug_mode = gr.Checkbox(label="Show Debug Logs", value=False)
             with gr.Row():
                 input_noise = gr.Slider(label="Input Noise Scale", **slider_range(NOISE))
                 latent_noise = gr.Slider(label="Latent Noise Scale", **slider_range(NOISE))
-
-            gr.Markdown("ℹ️ **Tiling reduces VRAM usage for huge resolutions.**")
             with gr.Row():
-                use_tile_vae = gr.Checkbox(label="Enable VAE Tiling", value=USE_TILE_VAE_DEFAULT)
+                use_tile_vae = gr.Checkbox(label="Enable VAE Tiling", value=USE_TILE_VAE_DEFAULT,
+                                           info="Less VRAM for large images")
                 # Forge keeps a slider's value in ui-config.json under its label and prefers it to the code default;
                 # this label is not "Tile Size" so the 1024 saved by older versions does not override the 512 default.
                 # Do not rename it back; any later label change resets the users' saved value again.
                 tile_size = gr.Slider(label="VAE Tile Size", **slider_range(TILE_SIZE))
                 tile_overlap = gr.Slider(label="Tile Overlap", info="At most half the VAE Tile Size is used",
                                          **slider_range(TILE_OVERLAP))
+        return (seed, save_original, force_reload, debug_mode, input_noise, latent_noise, use_tile_vae, tile_size,
+                tile_overlap)
 
-        return [dit_model, vae_model, seed, resolution, input_noise, latent_noise, force_reload, unload_sd, save_original,
-                use_tile_vae, tile_size, tile_overlap, debug_mode, after_run, blocks_to_swap, swap_io_components]
+    def after_component(self, component, **kwargs):
+        """Keep the txt2img controls the output size preview reads; Forge calls this for every component it builds,
+        and builds them before the scripts' UI."""
+        elem_id = kwargs.get("elem_id")
+        name = TXT2IMG_SIZE_SOURCES.get(elem_id) if isinstance(elem_id, str) else None
+        if name:
+            self._txt2img_size_sources[name] = component
+
+    def _txt2img_preview_inputs(self, size_controls) -> Optional[List[Any]]:
+        """Forge's size controls followed by ours, in the order `preview_txt2img_output_size` takes them; None when
+        one of Forge's was not seen (a UI layout setting can build the scripts first), so the note stays generic."""
+        sources = self._txt2img_size_sources
+        if any(name not in sources for name in TXT2IMG_SOURCE_ORDER):
+            return None
+        return [sources[name] for name in TXT2IMG_SOURCE_ORDER] + size_controls
+
+    @staticmethod
+    def _preview_txt2img_output_size(note, inputs) -> None:
+        """Update `note` whenever the image size (width, height, Hires. fix) or a size control changes, and once after
+        the page loads, through the hidden refresh button `javascript/seedvr2.js` presses."""
+        event = dict(fn=preview_txt2img_output_size, inputs=inputs, outputs=[note], show_progress="hidden")
+        refresh = gr.Button(value="Refresh output size", elem_id=TXT2IMG_SIZE_REFRESH_ID,
+                            elem_classes=["seedvr2-hidden"])
+        refresh.click(**event)
+        for component in inputs:
+            component.change(**event)
+
+    @staticmethod
+    def _preview_img2img_output_size(note, size_controls) -> None:
+        """Update `note` when a size control changes or the input image does. The image size is read in the browser
+        (`javascript/seedvr2.js`), so the image itself is not sent to the server; the script's JS presses the hidden
+        refresh button when the visible input image changes size."""
+        source_size = [gr.Number(value=0, visible=False), gr.Number(value=0, visible=False)]
+        refresh = gr.Button(value="Refresh output size", elem_id=IMG2IMG_SIZE_REFRESH_ID,
+                            elem_classes=["seedvr2-hidden"])
+        event = dict(fn=preview_img2img_output_size, _js="seedvr2Img2imgPreview", inputs=source_size + size_controls,
+                     outputs=[note], show_progress="hidden")
+        refresh.click(**event)
+        for component in size_controls:
+            component.change(**event)
+
+    @staticmethod
+    def _show_size_controls(size_mode):
+        """Show the control of the chosen size mode, hide the other two."""
+        chosen = parse_size_mode(size_mode)
+        return tuple(gr.update(visible=chosen is mode) for mode in SizeMode)
 
     @staticmethod
     def _refresh_models(current_dit, current_vae):
@@ -222,7 +363,11 @@ class Script(scripts.Script):
 
     def run(self, p, dit_model_name, vae_model_name, seed, resolution, input_noise, latent_noise, force_reload, unload_sd,
             save_original, use_tile_vae, tile_size, tile_overlap, debug_mode, after_run=AfterRun.UNLOAD.value,
-            blocks_to_swap=0, swap_io_components=False):
+            blocks_to_swap=0, swap_io_components=False, size_mode=FALLBACK_SIZE_MODE.value,
+            scale_factor=SCALE_FACTOR.default, long_edge=LONG_EDGE.default):
+        # An API caller may send fewer values than there are controls (older callers send 13 or 16). Forge does not
+        # pad the list with the UI's values: these defaults, or whatever Forge shifts into the missing positions, are
+        # read leniently, and an unreadable size mode means the shortest edge, the only mode older callers know.
         # Checked before the base image is generated, so a bad selection costs no generation time
         scan = scan_seedvr2_models()
         setup_error = find_selection_error(scan, dit_model_name, vae_model_name)
@@ -238,7 +383,8 @@ class Script(scripts.Script):
             return empty_result(p, f"Error: cannot import the SeedVR2 pipeline ({type(e).__name__}; see the console)")
 
         # Read before any generation, so a bad API value costs nothing
-        settings = parse_upscale_settings(resolution, input_noise, latent_noise, use_tile_vae, tile_size, tile_overlap)
+        settings = parse_upscale_settings(resolution, input_noise, latent_noise, use_tile_vae, tile_size, tile_overlap,
+                                          size_mode, scale_factor, long_edge)
         memory_plan = build_memory_plan(after_run, blocks_to_swap, swap_io_components)
 
         is_txt2img = isinstance(p, StableDiffusionProcessingTxt2Img)
@@ -264,7 +410,8 @@ class Script(scripts.Script):
         outcome = UpscaleRun(pipeline, MODEL_LIFECYCLE, forge_hooks()).upscale_images(collected.images, request,
                                                                                        force_reload, debug_mode)
 
-        params = seedvr2_generation_params(dit_model_name, vae_model_name, settings.resolution, collected.seed)
+        params = [seedvr2_generation_params(dit_model_name, vae_model_name, settings, image.size, collected.seed)
+                  for image in collected.images]
         return build_result(p, merge_run_images(collected.images, outcome.upscaled), collected.details, params,
                             outcome.failure, collected.result_seed, save_plan)
 

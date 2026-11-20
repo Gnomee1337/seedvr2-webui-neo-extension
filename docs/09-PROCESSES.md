@@ -32,9 +32,21 @@ The source of truth is the code.
 4. 🔄 rescans and updates both dropdowns and the note; a selected file that is still there stays selected.
 5. Selecting a DiT reads its size from the header (process 5, step 6); a 7B on a CUDA GPU with less than 11 GiB total
    memory shows a note recommending BlockSwap. Unknown size or GPU → no note.
-6. Controls: seed, resolution (shortest edge, 512–3840), unload SD, save original, force reload, debug logs;
-   "After run" (Unload SeedVR2 — default / Keep in RAM), BlockSwap blocks (0–36), BlockSwap I/O layers (BlockSwap is on when either is set);
-   "Advanced": input/latent noise, VAE tiling, tile size and overlap.
+6. Controls: the size group — output size mode (Scale factor — default, ×2 / Shortest edge / Long edge) with only
+   the chosen mode's control shown: resolution (shortest edge, 512–3840), scale factor (×1.0–×4.0, quick ×1.5 / ×2 / ×4
+   buttons), long edge (1024–3840 px) — and the output size line; "After run" (Unload SeedVR2 — default / Keep in
+   RAM), unload SD; BlockSwap blocks (0–36), BlockSwap I/O layers (BlockSwap is on when either is set);
+   "Advanced Settings": seed, save original, force reload, debug logs, input/latent noise, VAE tiling, tile size and
+   overlap. The order on screen is not the order of `run()`'s arguments (that is the returned list).
+7. Output size line (`seedvr2_neo/size_preview.py`): the size the upscale will give, from the same rules as the run.
+   txt2img: from Forge's width, height and Hires. fix controls (found by `elem_id` in `Script.after_component`;
+   Hires. fix size by Forge's formula, rounded to `res_step`), updated on any change of them or of the size
+   controls, and once after the page loads (`javascript/seedvr2.js` presses a hidden button: Forge applies
+   `ui-config.json` after `ui()`, so the line made there may name the code defaults); without those controls (a UI
+   layout setting can build the scripts first) a generic note. An image too thin to upscale: "too thin to upscale". img2img: the
+   image size is read in the browser (`javascript/seedvr2.js`), updated on a size control change and, through the
+   hidden refresh button, within a second of the input image changing; no image or the Batch tab → "depends on each
+   input image".
 
 **Writes:** nothing.
 **On failure:** an unreadable folder counts as empty — the note is shown.
@@ -68,8 +80,9 @@ The source of truth is the code.
 
 ## 5. SeedVR2 upscale (common part)  🟡
 0. Before any generation (process 3, step 1): the numeric settings are read and clamped to the slider ranges
-   (`parse_upscale_settings` in `seedvr2_neo/upscale_settings.py`; resolution 512–3840, noise 0–1, tile 512–2048,
-   overlap 64–512 and at most half the tile); an unreadable API value takes the slider's default.
+   (`parse_upscale_settings` in `seedvr2_neo/upscale_settings.py`; resolution 512–3840, scale factor 1–4, long edge
+   1024–3840, noise 0–1, tile 512–2048, overlap 64–512 and at most half the tile); an unreadable API value takes the
+   slider's default, a missing or unknown size mode means Shortest edge (`FALLBACK_SIZE_MODE`; the UI starts in Scale factor). Omitted size arguments (older API callers) → Shortest edge.
 1. Seed: the UI value, or for `-1` — the first generated image's seed (txt2img), else `p.seed`, else random. One seed
    for all images of the run. A typed seed outside 0 … 2³²−1 (the pipeline also seeds numpy) or not a number counts as
    `-1`, with a console line.
@@ -81,8 +94,15 @@ The source of truth is the code.
    batch would stop saving. With saving off nothing is written. "Save Extra Copy of Original" saves the img2img inputs
    with `-original` before the upscale; txt2img base images are saved by Forge.
 4. "Unload SD Checkpoint" → `modules.sd_models.unload_model_weights()` + `devices.torch_gc()`.
-5. Passes (`UpscaleRun.upscale_images` in `seedvr2_neo/upscale_run.py`; `group_by_shape` + `split_into_passes`): the inputs are grouped by size and mode, and each group is cut into
-   passes of at most 16 MP of upscaled output (`PASS_BUDGET_PIXELS`); a larger single frame gets its own pass. Each
+5. Passes (`UpscaleRun.upscale_images` in `seedvr2_neo/upscale_run.py`; `group_by_shape` + `split_into_passes`): the inputs are grouped by size and mode. Each size gets
+   its `OutputTarget` (`UpscaleSettings.target_for`): Shortest edge — the slider value for every size, the long edge
+   capped at 4× it; Scale factor — the factor times the input's size, the long edge at most 3840
+   (`MAX_OUTPUT_LONG_EDGE`); Long edge — the shortest edge giving the chosen long edge. In the last two the cap is the
+   pipeline's `max_resolution`; in Scale factor a shortest edge under 512 is raised towards 512 only while the long edge
+   stays within the cap (a very wide panorama keeps the cap). An image so thin that the capped short side is under
+   2 px cannot be upscaled: the pipeline fails on it and it comes back with `SeedVR2 Error`. A console line per group
+   names the output size (and the raise, with the shortest edge reached). Each group is cut into passes of at most 16 MP of upscaled
+   output (`PASS_BUDGET_PIXELS`, counted with that size's output); a larger single frame gets its own pass. Each
    pass → one tensor `[N, H, W, C]` float16 (built per image).
 6. Cached models (`GlobalModelCache`, ids `forge_dit` / `forge_vae`) are dropped before the run when "Force Reload" is on
    or when the selected files are not the ones they were loaded from (absolute path, size, modification time, read at
@@ -107,8 +127,9 @@ The source of truth is the code.
    interrupt — both models are removed from the cache. Either way `gc.collect()` + `devices.torch_gc()`; the console says which.
 12. Result (`build_result` in the script, `finish_images` in `seedvr2_neo/run_results.py`): one image and one infotext per input, in input order. The infotext is the
    base one (`BaseInfotext` in `seedvr2_neo/run_results.py`: Forge's infotext of the generated image in txt2img; the
-   prompt and `Negative prompt:` line in img2img) with `SeedVR2 Model`, `SeedVR2 VAE`, `SeedVR2 Resolution`,
-   `SeedVR2 Seed` added to its parameters line. Forge's `create_infotext` is not used: it reads the SD model, which is
+   prompt and `Negative prompt:` line in img2img) with `SeedVR2 Model`, `SeedVR2 VAE`, `SeedVR2 Resolution` (the shortest
+   edge this input was upscaled to), `SeedVR2 Seed`, `SeedVR2 Size Mode` and, by mode, `SeedVR2 Scale` or
+   `SeedVR2 Long Edge` added to its parameters line. Forge's `create_infotext` is not used: it reads the SD model, which is
    unloaded (or never loaded) by then. The infotext is also put into each returned image's `info["parameters"]`
    (with `enable_pnginfo`), so unsaved gallery and API images carry it. An upscaled image is saved to
    `p.outpath_samples` with `-seedvr2` by the saving plan (`samples_format` and `save_to_dirs` from the request's

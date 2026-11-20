@@ -37,6 +37,7 @@ class Component:
     def __init__(self, *args, **kwargs):
         self.args = args
         self.kwargs = kwargs
+        self.value = kwargs.get("value", args[0] if args else None)
         self.events: List[Dict[str, Any]] = []
 
     def __enter__(self):
@@ -46,15 +47,15 @@ class Component:
         return False
 
     def click(self, fn=None, inputs=None, outputs=None, **kwargs):
-        self.events.append({"event": "click", "fn": fn, "inputs": inputs, "outputs": outputs})
+        self.events.append({"event": "click", "fn": fn, "inputs": inputs, "outputs": outputs, **kwargs})
 
     def change(self, fn=None, inputs=None, outputs=None, **kwargs):
-        self.events.append({"event": "change", "fn": fn, "inputs": inputs, "outputs": outputs})
+        self.events.append({"event": "change", "fn": fn, "inputs": inputs, "outputs": outputs, **kwargs})
 
 
 def make_gradio() -> types.ModuleType:
     gradio = types.ModuleType("gradio")
-    for name in ("Row", "Accordion", "Dropdown", "Markdown", "Number", "Slider", "Checkbox", "Radio", "Button"):
+    for name in ("Row", "Column", "Group", "Accordion", "Dropdown", "Markdown", "Number", "Slider", "Checkbox", "Radio", "Button"):
         setattr(gradio, name, type(name, (Component,), {}))
     gradio.update = lambda **kwargs: {"__type__": "update", **kwargs}
     return gradio
@@ -70,6 +71,7 @@ class Options:
         self.samples_format = "png"
         self.save_to_dirs = True
         self.enable_pnginfo = True
+        self.res_step = 64
         self.return_grid = True  # read by the stub `process_images` only
 
 
@@ -460,6 +462,6 @@ def run_args(**overrides):
     args = dict(dit_model_name=DIT, vae_model_name=VAE, seed=-1, resolution=1080, input_noise=0.0, latent_noise=0.0,
                 force_reload=False, unload_sd=True, save_original=False, use_tile_vae=True, tile_size=512,
                 tile_overlap=128, debug_mode=False, after_run="Unload SeedVR2", blocks_to_swap=0,
-                swap_io_components=False)
+                swap_io_components=False, size_mode="Shortest edge", scale_factor=2.0, long_edge=2048)
     args.update(overrides)
     return args

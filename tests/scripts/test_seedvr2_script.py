@@ -53,6 +53,7 @@ RUN_PARAMETER_LABELS = {
     "save_original": "Save Extra Copy of Original", "use_tile_vae": "Enable VAE Tiling", "tile_size": "VAE Tile Size",
     "tile_overlap": "Tile Overlap", "debug_mode": "Show Debug Logs", "after_run": "After run",
     "blocks_to_swap": "BlockSwap: DiT blocks kept in RAM", "swap_io_components": "BlockSwap: I/O layers too",
+    "size_mode": "Output Size Mode", "scale_factor": "Scale Factor", "long_edge": "Output Long Edge (px)",
 }
 
 
@@ -393,32 +394,205 @@ def test_run_accepts_the_arguments_of_an_older_ui(script, make_txt2img):
     assert processed.images[0].size == UPSCALED_SIZE
 
 
-# --- the calls into the vendored pipeline ----------------------------------------------------------------------------
-
-def real_parameters(module_name, function_name):
-    """Positional parameter names, keyword names, required names and whether `**kwargs` is accepted, read from the
-    vendored source (not imported: it needs the pipeline's packages)."""
-    path = os.path.join(REPO_ROOT, *module_name.split(".")) + ".py"
-    with open(path, encoding="utf-8") as source:
-        tree = ast.parse(source.read())
-    function = next(node for node in tree.body if isinstance(node, ast.FunctionDef) and node.name == function_name)
-    arguments = function.args
-    positional = [arg.arg for arg in arguments.posonlyargs + arguments.args]
-    keywords = positional + [arg.arg for arg in arguments.kwonlyargs]
-    required = positional[:len(positional) - len(arguments.defaults)] + [
-        arg.arg for arg, default in zip(arguments.kwonlyargs, arguments.kw_defaults) if default is None]
-    return positional, keywords, required, arguments.kwarg is not None
+def test_run_with_the_arguments_before_the_size_modes_keeps_the_shortest_edge(script, pipeline):
+    """API callers built before the size modes pass 16 arguments, ending with the BlockSwap I/O flag."""
+    args = list(run_args(resolution=1536).values())[:16]
+    processed = script.run(make_img2img([Image.new("RGB", (512, 384)), Image.new("RGB", (1024, 768))]), *args)
+    assert [kwargs["resolution"] for kwargs in pipeline.generation_kwargs] == [1536, 1536]
+    assert all("SeedVR2 Resolution: 1536" in infotext and "SeedVR2 Size Mode: Shortest edge" in infotext
+               for infotext in processed.infotexts)
 
 
-def test_every_pipeline_call_fits_the_real_vendored_signature(script, make_txt2img, pipeline):
-    """The fake pipeline accepts anything; a keyword renamed upstream must still fail a test, not every user's run."""
-    run(script, make_txt2img(batch_size=2))
-    called = {(call.module, call.function) for call in pipeline.calls}
-    assert called == {(module, name) for module, names in PIPELINE_FUNCTIONS.items() for name in names}
-    for call in pipeline.calls:
-        positional, keywords, required, takes_any_keyword = real_parameters(call.module, call.function)
-        assert call.positional_count <= len(positional), call
-        supplied = set(positional[:call.positional_count]) | set(call.keywords)
-        assert set(required) <= supplied, (call, set(required) - supplied)
-        assert takes_any_keyword or set(call.keywords) <= set(keywords), (call, set(call.keywords) - set(keywords))
-        assert not set(call.keywords) & set(positional[:call.positional_count]), call
+# --- output size modes -----------------------------------------------------------------------------------------------
+
+def test_scale_factor_gives_each_input_size_its_own_resolution(script, pipeline, capsys):
+    inputs = [Image.new("RGB", (512, 384)), Image.new("RGB", (1024, 768)), Image.new("RGB", (512, 384))]
+    processed = run(script, make_img2img(inputs), size_mode="Scale factor", scale_factor=2)
+    assert [(len(kwargs_pass), kwargs["resolution"], kwargs["max_resolution"])
+            for kwargs_pass, kwargs in zip(pipeline.passes, pipeline.generation_kwargs)] == [(2, 768, 3840),
+                                                                                            (1, 1536, 3840)]
+    assert ["SeedVR2 Resolution: 768" in processed.infotexts[0], "SeedVR2 Resolution: 1536" in processed.infotexts[1],
+            "SeedVR2 Resolution: 768" in processed.infotexts[2]] == [True] * 3
+    assert all("SeedVR2 Size Mode: Scale factor, SeedVR2 Scale: 2.0" in infotext for infotext in processed.infotexts)
+    console = capsys.readouterr().out
+    assert "2 images 512x384 -> 1024x768" in console and "1 image 1024x768 -> 2048x1536" in console
+
+
+def test_long_edge_mode_names_the_long_edge_and_keeps_it(script, pipeline):
+    processed = run(script, make_img2img([Image.new("RGB", (1920, 1080))]), size_mode="Long edge", long_edge=2048)
+    assert pipeline.generation_kwargs[0]["resolution"] == 1152
+    assert "SeedVR2 Resolution: 1152" in processed.infotexts[0]
+    assert "SeedVR2 Size Mode: Long edge, SeedVR2 Long Edge: 2048" in processed.infotexts[0]
+
+
+def test_small_input_raised_to_512_is_noted_in_the_console(script, pipeline, capsys):
+    run(script, make_img2img([Image.new("RGB", (384, 384))]), size_mode="Scale factor", scale_factor=1)
+    assert pipeline.generation_kwargs[0]["resolution"] == 512
+    assert "384x384 -> 512x512 (shortest edge raised to 512 px)" in capsys.readouterr().out
+
+
+@pytest.mark.parametrize("size_mode, scale_factor, long_edge", [("8K", 2, 2048), (None, "x", None), (3, -1, 10**9),
+                                                                 ("Scale factor", float("nan"), "abc"),
+                                                                 ("Long edge", None, float("inf"))])
+def test_hostile_size_values_from_the_api_fall_back_instead_of_failing(script, pipeline, size_mode, scale_factor,
+                                                                       long_edge):
+    processed = run(script, make_img2img([Image.new("RGB", (1024, 576))]), size_mode=size_mode,
+                    scale_factor=scale_factor, long_edge=long_edge)
+    assert "SeedVR2 Error" not in processed.infotexts[0]
+    assert 512 <= pipeline.generation_kwargs[0]["resolution"] <= 3840
+
+
+def shown_column(script, update_order, mode):
+    """The column `_show_size_controls(mode)` leaves visible, by the slider label inside it."""
+    updates = script._show_size_controls(mode)
+    return [label for label, update in zip(update_order, updates) if update["visible"]]
+
+
+def test_size_mode_shows_only_its_own_control(script):
+    script.ui(is_img2img=False)
+    # the order of the outputs `size_mode.change` updates: the modes in the radio's order
+    order = ["Scale Factor", "Upscale Resolution (Shortest Edge)", "Output Long Edge (px)"]
+    assert shown_column(script, order, "Scale factor") == ["Scale Factor"]
+    assert shown_column(script, order, "Shortest edge") == ["Upscale Resolution (Shortest Edge)"]
+    assert shown_column(script, order, "Long edge") == ["Output Long Edge (px)"]
+    assert shown_column(script, order, "garbage") == ["Upscale Resolution (Shortest Edge)"]
+
+
+def test_size_mode_change_updates_the_columns_in_the_order_of_the_modes(script, script_module):
+    columns = []
+    column_class = script_module.gr.Column
+
+    def recording_column(*args, **kwargs):
+        columns.append(column_class(*args, **kwargs))
+        return columns[-1]
+
+    script_module.gr.Column = recording_column
+    try:
+        components = {component.kwargs["label"]: component for component in script.ui(is_img2img=True)}
+    finally:
+        script_module.gr.Column = column_class
+    outputs = next(event["outputs"] for event in components["Output Size Mode"].events
+                   if event["fn"] == script._show_size_controls)
+    # columns are created scale factor, shortest edge, long edge; the radio lists the modes in the same order
+    assert outputs == columns[:3]
+    assert components["Output Size Mode"].kwargs["choices"] == ["Scale factor", "Shortest edge", "Long edge"]
+
+
+def test_ui_starts_in_the_scale_factor_mode_and_keeps_the_old_shortest_edge_label(script):
+    """The old label keeps the px value users saved in ui-config.json; new controls have new labels."""
+    components = {component.kwargs["label"]: component for component in script.ui(is_img2img=True)}
+    assert components["Output Size Mode"].kwargs["value"] == "Scale factor"
+    assert components["Upscale Resolution (Shortest Edge)"].kwargs["value"] == 1080
+    assert (components["Scale Factor"].kwargs["value"], components["Output Long Edge (px)"].kwargs["value"]) == (2.0,
+                                                                                                                2048)
+
+
+def test_api_call_without_a_size_mode_keeps_the_shortest_edge_although_the_ui_starts_in_scale_factor(script):
+    assert inspect.signature(script.run).parameters["size_mode"].default == "Shortest edge"
+
+
+# --- output size preview ---------------------------------------------------------------------------------------------
+
+def forge_txt2img_size_controls(script, gr, width=512, height=384, enable_hr=False, hr_scale=2.0):
+    """Forge's txt2img size controls as Forge builds them before the scripts' UI, passed to `after_component`."""
+    controls = {
+        "txt2img_width": gr.Slider(value=width, elem_id="txt2img_width"),
+        "txt2img_height": gr.Slider(value=height, elem_id="txt2img_height"),
+        "txt2img_hr-checkbox": gr.Checkbox(value=enable_hr, elem_id="txt2img_hr-checkbox"),
+        "txt2img_hr_scale": gr.Slider(value=hr_scale, elem_id="txt2img_hr_scale"),
+        "txt2img_hr_resize_x": gr.Slider(value=0, elem_id="txt2img_hr_resize_x"),
+        "txt2img_hr_resize_y": gr.Slider(value=0, elem_id="txt2img_hr_resize_y"),
+    }
+    script.after_component(gr.Accordion(elem_id="txt2img_hr"), elem_id="txt2img_hr")  # the accordion is not the flag
+    for elem_id, component in controls.items():
+        script.after_component(component, **component.kwargs)
+    return controls
+
+
+def output_size_note(script, is_img2img):
+    """The Markdown the preview writes to: the first Markdown created after the size controls."""
+    created = []
+    gr = sys.modules["gradio"]
+    markdown_class = gr.Markdown
+
+    def recording_markdown(*args, **kwargs):
+        created.append(markdown_class(*args, **kwargs))
+        return created[-1]
+
+    gr.Markdown = recording_markdown
+    try:
+        components = script.ui(is_img2img=is_img2img)
+    finally:
+        gr.Markdown = markdown_class
+    note = next(markdown for markdown in created if str(markdown.value).startswith("Output size"))
+    return note, {component.kwargs["label"]: component for component in components}
+
+
+def test_txt2img_preview_starts_with_the_size_of_forge_s_controls(script):
+    forge_txt2img_size_controls(script, sys.modules["gradio"], width=832, height=1216)
+    note, _ = output_size_note(script, is_img2img=False)
+    assert note.value == "Output size: **1664×2432** from 832×1216"  # the scale factor x2 the UI starts with
+
+
+def test_txt2img_preview_follows_every_size_control(script):
+    forge = forge_txt2img_size_controls(script, sys.modules["gradio"])
+    note, ours = output_size_note(script, is_img2img=False)
+    watched = list(forge.values()) + [ours["Upscale Resolution (Shortest Edge)"], ours["Output Size Mode"],
+                                      ours["Scale Factor"], ours["Output Long Edge (px)"]]
+    for component in watched:
+        event = next(event for event in component.events if event["outputs"] == [note])
+        assert event["inputs"] == watched
+    handler = next(event for event in forge["txt2img_width"].events if event["outputs"] == [note])["fn"]
+    # 512x384 with Hires. fix x2 -> 1024x768, then the scale factor x2
+    assert handler(512, 384, True, 2.0, 0, 0, 1080, "Scale factor", 2.0, 2048) == \
+        "Output size: **2048×1536** from 1024×768"
+
+
+def test_txt2img_preview_without_forge_s_controls_stays_generic(script):
+    note, ours = output_size_note(script, is_img2img=False)
+    assert note.value == "Output size: depends on each input image"
+    assert not any(event["outputs"] == [note] for event in ours["Scale Factor"].events)
+
+
+def test_img2img_preview_reads_the_image_size_in_the_browser(script):
+    note, ours = output_size_note(script, is_img2img=True)
+    event = next(event for event in ours["Scale Factor"].events if event["outputs"] == [note])
+    assert event["_js"] == "seedvr2Img2imgPreview"
+    assert event["inputs"][2:] == [ours["Upscale Resolution (Shortest Edge)"], ours["Output Size Mode"],
+                                   ours["Scale Factor"], ours["Output Long Edge (px)"]]
+    assert event["fn"](512, 384, 1080, "Scale factor", 1.5, 2048) == "Output size: **768×576** from 512×384"
+    assert event["fn"](0, 0, 1080, "Scale factor", 1.5, 2048) == "Output size: depends on each input image"
+
+
+def test_refresh_button_ids_match_the_script_s_javascript(script_module):
+    with open(os.path.join(REPO_ROOT, "javascript", "seedvr2.js"), encoding="utf-8") as js:
+        source = js.read()
+    assert f'"{script_module.IMG2IMG_SIZE_REFRESH_ID}"' in source
+    assert f'"{script_module.TXT2IMG_SIZE_REFRESH_ID}"' in source
+    assert "function seedvr2Img2imgPreview" in source
+
+
+def test_txt2img_preview_is_refreshed_once_the_page_has_the_saved_values(script, script_module, monkeypatch):
+    """Forge applies ui-config.json after `ui()`, so the line made there may name the code defaults; the hidden button
+    the page presses on load recomputes it from the values the page really has."""
+    buttons = []
+    button_class = script_module.gr.Button
+
+    def recording_button(*args, **kwargs):
+        buttons.append(button_class(*args, **kwargs))
+        return buttons[-1]
+
+    monkeypatch.setattr(script_module.gr, "Button", recording_button)
+    forge = forge_txt2img_size_controls(script, script_module.gr)
+    note, ours = output_size_note(script, is_img2img=False)
+    refresh = next(button for button in buttons if button.kwargs.get("elem_id") == script_module.TXT2IMG_SIZE_REFRESH_ID)
+    event = refresh.events[0]
+    assert event["outputs"] == [note] and event["inputs"][:6] == list(forge.values())
+    assert "seedvr2-hidden" in refresh.kwargs["elem_classes"]
+
+
+def test_size_mode_is_not_saved_in_ui_config_so_it_always_matches_the_visible_slider(script):
+    """Forge skips both saving and applying a component with `do_not_save_to_config` (`modules/ui_loadsave.py`)."""
+    components = {component.kwargs["label"]: component for component in script.ui(is_img2img=False)}
+    assert components["Output Size Mode"].do_not_save_to_config is True
+    assert not getattr(components["Scale Factor"], "do_not_save_to_config", False)

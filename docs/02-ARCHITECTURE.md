@@ -66,7 +66,17 @@ None of its own: the UI lives inside the txt2img / img2img tabs.
 - `seedvr2_script.py` — the Forge side: UI controls, the model refresh button and the 7B low-VRAM note, the model
   check and pipeline import before a run, collecting the images to upscale (txt2img base images / img2img inputs),
   the SD unload, the process-wide `MODEL_LIFECYCLE`, Forge's hooks for the run (`forge_hooks`: device, memory release,
-  `shared.state.interrupted`), saving (`-seedvr2`, `-original`) and Forge's `Processed`.
+  `shared.state.interrupted`), saving (`-seedvr2`, `-original`) and Forge's `Processed`. `ui()` builds four sections
+  (`_model_controls`, `_size_controls`, `_memory_controls`, `_advanced_controls`) and returns the controls in `run()`'s
+  order. The output size preview: `after_component` keeps Forge's txt2img width / height / Hires. fix controls (by
+  `elem_id`), whose changes update the size line; in img2img the browser reads the image size.
+
+### javascript/, style.css
+Loaded by Forge into the page (any extension's `javascript/*.js` and `style.css`).
+- `javascript/seedvr2.js` — on page load presses the hidden txt2img refresh button once (the saved UI values are in
+  place by then); the img2img input image size read from the page (`seedvr2Img2imgPreview`, the `_js` of the preview
+  events), and a once-a-second check that presses the hidden img2img refresh button when that size changes.
+- `style.css` — the hidden refresh button, the size group, the quick scale buttons, the highlighted size line.
 
 ### seedvr2_neo/
 No Forge or Gradio imports; torch only in `upscale_run.py`. Tested outside Forge.
@@ -80,11 +90,16 @@ No Forge or Gradio imports; torch only in `upscale_run.py`. Tested outside Forge
   (Unload, error, interrupt), then releases memory through a function the script passes in.
 - `run_inputs.py` (Pillow, numpy) — `select_generated_images` (skip the grid and extras), `select_distinct_images`
   (Batch tab repeats), `to_pipeline_image` (any mode → RGB / RGBA), `group_by_shape`, `split_into_passes`
-  (`PASS_BUDGET_PIXELS`), `resolve_seed` / `parse_seed` / `is_unusable_seed`.
-- `upscale_settings.py` — slider `Bounds` (resolution, noise, tile size and overlap) and `parse_upscale_settings` →
-  `UpscaleSettings`, clamped to those bounds; the script builds its sliders from the same bounds.
+  (`PASS_BUDGET_PIXELS`, output pixels per input size from the caller), `resolve_seed` / `parse_seed` / `is_unusable_seed`.
+- `size_preview.py` — `describe_output_size` (the size line shown before a run, through `UpscaleSettings.target_for`)
+  and `txt2img_final_size` (width x height, or the Hires. fix size by Forge's formula and `res_step`).
+- `upscale_settings.py` — slider `Bounds` (resolution, scale factor, long edge, noise, tile size and overlap),
+  `SizeMode` (Shortest edge / Scale factor / Long edge) and `parse_upscale_settings` → `UpscaleSettings`, clamped to
+  those bounds; the script builds its sliders from the same bounds. `UpscaleSettings.target_for(size)` →
+  `OutputTarget` (the pipeline's `resolution` / `max_resolution` for one input size, its output size and pixels, and
+  `raise_note` for the console and the size line).
 - `run_results.py` — `plan_saving` → `SavePlan`; `read_option` (a Forge option with the request's `override_settings`);
-  `GenerationParam` keys and `seedvr2_generation_params` /
+  `GenerationParam` keys and `seedvr2_generation_params` (per input: its resolution, the size mode) /
   `failure_generation_params`; `merge_run_images` → `RunImage` list (one per input); `BaseInfotext` (prompt part +
   parameters line, from Forge's infotext or a bare prompt) and `InputDetails` (seed, prompt, base infotext per input),
   built by `describe_generated_inputs` / `describe_uploaded_inputs`; `finish_images` → `ResultImage` list (infotext per
@@ -92,7 +107,7 @@ No Forge or Gradio imports; torch only in `upscale_run.py`. Tested outside Forge
   `not_upscaled_comment`.
 - `upscale_run.py` (torch, torchvision) — `import_pipeline` (the vendored modules, imported at run time), `UpscaleRequest`,
   `HostHooks` (device, memory release, interrupt flag from the host), `UpscaleRun.upscale_images` → `UpscaleOutcome`
-  (upscaled images by input index, failure text): passes, the four phases with fresh context, memory release after each
+  (upscaled images by input index, failure text): an `OutputTarget` per input size, passes, the four phases with fresh context, memory release after each
   phase, interrupt via the progress callback, errors reduced to their type; `images_to_tensor` / `tensor_to_images`.
 
 ### seedvr2_vendor/core/

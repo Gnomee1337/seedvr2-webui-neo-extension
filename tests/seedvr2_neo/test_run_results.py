@@ -2,6 +2,14 @@
 import pytest
 
 from seedvr2_neo import run_results as rr
+from seedvr2_neo.upscale_settings import parse_upscale_settings
+
+
+def settings(**overrides):
+    values = dict(resolution=1080, input_noise=0.0, latent_noise=0.0, use_tile_vae=True, tile_size=512,
+                  tile_overlap=128)
+    values.update(overrides)
+    return parse_upscale_settings(**values)
 
 
 # --- plan_saving ---
@@ -63,21 +71,39 @@ def test_missing_or_odd_override_settings_give_the_default(overrides):
 
 # --- generation parameters ---
 
-def test_success_params_name_models_resolution_and_seed():
-    params = rr.seedvr2_generation_params("dit.safetensors", "vae.safetensors", 1080, 42)
+def test_success_params_name_models_resolution_seed_and_size_mode():
+    params = rr.seedvr2_generation_params("dit.safetensors", "vae.safetensors", settings(), (512, 384), 42)
 
     assert params == {"SeedVR2 Model": "dit.safetensors", "SeedVR2 VAE": "vae.safetensors",
-                      "SeedVR2 Resolution": 1080, "SeedVR2 Seed": 42}
+                      "SeedVR2 Resolution": 1080, "SeedVR2 Seed": 42, "SeedVR2 Size Mode": "Shortest edge"}
+
+
+def test_scale_factor_params_name_the_factor_and_the_resolution_of_this_input():
+    chosen = settings(size_mode="Scale factor", scale_factor=1.5)
+
+    small = rr.seedvr2_generation_params("dit", "vae", chosen, (512, 384), 42)
+    large = rr.seedvr2_generation_params("dit", "vae", chosen, (1024, 768), 42)
+
+    assert (small["SeedVR2 Resolution"], large["SeedVR2 Resolution"]) == (576, 1152)
+    assert small["SeedVR2 Size Mode"] == "Scale factor" and small["SeedVR2 Scale"] == 1.5
+    assert "SeedVR2 Long Edge" not in small
+
+
+def test_long_edge_params_name_the_long_edge():
+    params = rr.seedvr2_generation_params("dit", "vae", settings(size_mode="Long edge", long_edge=2048), (1920, 1080), 1)
+
+    assert params["SeedVR2 Size Mode"] == "Long edge" and params["SeedVR2 Long Edge"] == 2048
+    assert params["SeedVR2 Resolution"] == 1152 and "SeedVR2 Scale" not in params
 
 
 def test_failure_params_keep_the_attempt_and_add_the_message():
     # Forge parses the last line as parameters only with 3+ of them, so the SeedVR2 keys stay
-    params = rr.seedvr2_generation_params("dit", "vae", 1080, 42)
+    params = rr.seedvr2_generation_params("dit", "vae", settings(), (512, 512), 42)
 
     failed = rr.failure_generation_params(params, "Interrupted")
 
     assert failed == {**params, "SeedVR2 Error": "Interrupted"}
-    assert params == rr.seedvr2_generation_params("dit", "vae", 1080, 42)  # not mutated
+    assert params == rr.seedvr2_generation_params("dit", "vae", settings(), (512, 512), 42)  # not mutated
 
 
 # --- BaseInfotext ---
@@ -182,17 +208,18 @@ def test_finish_images_gives_one_infotext_per_input_with_the_failure_on_the_inpu
     upscaled, returned = FakeImage("up"), FakeImage("in")
     run_images = [rr.RunImage(upscaled, True), rr.RunImage(returned, False)]
 
-    results = rr.finish_images(run_images, _details(2), {"SeedVR2 Seed": 1}, "Interrupted", embed_infotext=True)
+    params = [{"SeedVR2 Resolution": 1080}, {"SeedVR2 Resolution": 2160}]
+    results = rr.finish_images(run_images, _details(2), params, "Interrupted", embed_infotext=True)
 
     assert [r.image.name for r in results] == ["up", "in-copy"]  # the input itself is not changed
-    assert results[0].infotext == "p\nSeedVR2 Seed: 1"
-    assert results[1].infotext == "p\nSeedVR2 Seed: 1, SeedVR2 Error: Interrupted"
+    assert results[0].infotext == "p\nSeedVR2 Resolution: 1080"
+    assert results[1].infotext == "p\nSeedVR2 Resolution: 2160, SeedVR2 Error: Interrupted"
     assert [r.image.info[rr.PNG_INFO_KEY] for r in results] == [r.infotext for r in results]
     assert returned.info == {}
 
 
 def test_finish_images_without_a_reason_says_not_upscaled_and_can_leave_the_image_info_alone():
-    results = rr.finish_images([rr.RunImage(FakeImage("in"), False)], _details(1), {}, None, embed_infotext=False)
+    results = rr.finish_images([rr.RunImage(FakeImage("in"), False)], _details(1), [{}], None, embed_infotext=False)
 
     assert results[0].infotext.endswith("SeedVR2 Error: not upscaled")
     assert results[0].image.info == {}

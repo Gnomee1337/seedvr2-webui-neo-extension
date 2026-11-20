@@ -136,39 +136,50 @@ def test_i16n_is_scaled_not_black():
 
 # --- split_into_passes ---
 
+def shortest_edge_pixels(resolution):
+    """Upscaled pixels when the shortest edge goes to `resolution`, the other edge in proportion."""
+    return lambda size: int(resolution * resolution * max(size) / min(size))
+
+
 def test_small_group_is_one_pass():
     images = [Image.new("RGB", (512, 512)) for _ in range(4)]
 
-    assert ri.split_into_passes([[0, 1, 2, 3]], images, 1024) == [[0, 1, 2, 3]]
+    assert ri.split_into_passes([[0, 1, 2, 3]], images, shortest_edge_pixels(1024)) == [[0, 1, 2, 3]]
 
 
 def test_group_over_the_budget_is_split_in_order():
     images = [Image.new("RGB", (512, 512)) for _ in range(5)]
     budget = 2 * 1024 * 1024  # two upscaled 1024x1024 frames
 
-    assert ri.split_into_passes([[0, 1, 2, 3, 4]], images, 1024, budget) == [[0, 1], [2, 3], [4]]
+    assert ri.split_into_passes([[0, 1, 2, 3, 4]], images, shortest_edge_pixels(1024), budget) == [[0, 1], [2, 3], [4]]
 
 
 def test_frame_larger_than_the_budget_gets_its_own_pass():
     images = [Image.new("RGB", (512, 512)) for _ in range(2)]
 
-    assert ri.split_into_passes([[0, 1]], images, 3840, 1024) == [[0], [1]]
+    assert ri.split_into_passes([[0, 1]], images, shortest_edge_pixels(3840), 1024) == [[0], [1]]
 
 
 def test_groups_are_never_merged():
     images = [Image.new("RGB", (8, 8)), Image.new("RGB", (4, 8))]
 
-    assert ri.split_into_passes([[0], [1]], images, 512) == [[0], [1]]
+    assert ri.split_into_passes([[0], [1]], images, shortest_edge_pixels(512)) == [[0], [1]]
 
 
 def test_default_budget_keeps_a_batch_of_8_at_1080p_in_one_pass():
     images = [Image.new("RGB", (1024, 1024)) for _ in range(8)]
 
-    assert ri.split_into_passes([list(range(8))], images, 1080) == [list(range(8))]
+    assert ri.split_into_passes([list(range(8))], images, shortest_edge_pixels(1080)) == [list(range(8))]
 
 
-def test_output_pixels_follow_the_aspect_ratio():
-    assert ri.estimate_output_pixels((1000, 500), 1000) == 2_000_000
+def test_each_size_is_budgeted_by_its_own_output_pixels():
+    """In the scale factor mode a small input gives a small output: its group packs more frames into a pass."""
+    images = [Image.new("RGB", (512, 512)) for _ in range(4)] + [Image.new("RGB", (1024, 1024)) for _ in range(4)]
+    budget = 4 * 1024 * 1024  # four 1024x1024 outputs, or one 2048x2048
+
+    passes = ri.split_into_passes([[0, 1, 2, 3], [4, 5, 6, 7]], images, lambda size: 4 * size[0] * size[1], budget)
+
+    assert passes == [[0, 1, 2, 3], [4], [5], [6], [7]]
 
 
 # --- resolve_seed ---

@@ -8,7 +8,9 @@ infotexts and saving"), so a failed image comes back as its input instead of dro
 import json
 from dataclasses import dataclass
 from enum import Enum
-from typing import Any, Dict, Generic, List, Mapping, Optional, Sequence, TypeVar
+from typing import Any, Dict, Generic, List, Mapping, Optional, Sequence, Tuple, TypeVar
+
+from seedvr2_neo.upscale_settings import SizeMode, UpscaleSettings
 
 T = TypeVar("T")
 
@@ -27,6 +29,9 @@ class GenerationParam(str, Enum):
     VAE = "SeedVR2 VAE"
     RESOLUTION = "SeedVR2 Resolution"
     SEED = "SeedVR2 Seed"
+    SIZE_MODE = "SeedVR2 Size Mode"
+    SCALE_FACTOR = "SeedVR2 Scale"
+    LONG_EDGE = "SeedVR2 Long Edge"
     ERROR = "SeedVR2 Error"
 
 
@@ -72,14 +77,22 @@ def read_option(override_settings: Any, name: str, default: Any) -> Any:
     return default
 
 
-def seedvr2_generation_params(dit_model: str, vae_model: str, resolution: int, seed: int) -> Dict[str, Any]:
-    """Parameters of a successful upscale, added to the image's infotext."""
-    return {
+def seedvr2_generation_params(dit_model: str, vae_model: str, settings: UpscaleSettings, size: Tuple[int, int],
+                              seed: int) -> Dict[str, Any]:
+    """Parameters of the upscale of an input of `size` (width, height), added to its infotext. The resolution is the
+    shortest edge this input was upscaled to, which in the scale factor and long edge modes depends on its size."""
+    params = {
         GenerationParam.MODEL.value: dit_model,
         GenerationParam.VAE.value: vae_model,
-        GenerationParam.RESOLUTION.value: resolution,
+        GenerationParam.RESOLUTION.value: settings.target_for(size).resolution,
         GenerationParam.SEED.value: seed,
+        GenerationParam.SIZE_MODE.value: settings.size_mode.value,
     }
+    if settings.size_mode is SizeMode.SCALE_FACTOR:
+        params[GenerationParam.SCALE_FACTOR.value] = settings.scale_factor
+    elif settings.size_mode is SizeMode.LONG_EDGE:
+        params[GenerationParam.LONG_EDGE.value] = settings.long_edge
+    return params
 
 
 def failure_generation_params(params: Mapping[str, Any], message: str) -> Dict[str, Any]:
@@ -159,16 +172,19 @@ class ResultImage:
     is_upscaled: bool
 
 
-def finish_images(run_images: Sequence[RunImage], details: Sequence[InputDetails], params: Mapping[str, Any],
-                  failure: Optional[str], embed_infotext: bool) -> List[ResultImage]:
-    """One image and one infotext per input, in input order (Forge pairs them by index). Upscaled images carry the
-    SeedVR2 parameters; the others also the reason they were not upscaled. With `embed_infotext` (Forge's "Save text
-    information about generation parameters as chunks to png files") the infotext also goes into the image, where
-    Forge's gallery and API look for it when the image is not saved to disk."""
-    failure_params = failure_generation_params(params, failure or NOT_UPSCALED_MESSAGE)
+def finish_images(run_images: Sequence[RunImage], details: Sequence[InputDetails],
+                  params: Sequence[Mapping[str, Any]], failure: Optional[str],
+                  embed_infotext: bool) -> List[ResultImage]:
+    """One image and one infotext per input, in input order (Forge pairs them by index). Upscaled images carry their
+    SeedVR2 parameters (`params`, one mapping per input); the others also the reason they were not upscaled. With
+    `embed_infotext` (Forge's "Save text information about generation parameters as chunks to png files") the
+    infotext also goes into the image, where Forge's gallery and API look for it when the image is not saved to disk."""
+    reason = failure or NOT_UPSCALED_MESSAGE
     results = []
-    for run_image, input_details in zip(run_images, details):
-        infotext = input_details.infotext.with_params(params if run_image.is_upscaled else failure_params)
+    for run_image, input_details, image_params in zip(run_images, details, params, strict=True):
+        if not run_image.is_upscaled:
+            image_params = failure_generation_params(image_params, reason)
+        infotext = input_details.infotext.with_params(image_params)
         # Upscaled images are the run's own; inputs and Forge's base images are copied before their info changes
         image = run_image.image if run_image.is_upscaled else copy_keeping_saved_file(run_image.image)
         if embed_infotext:

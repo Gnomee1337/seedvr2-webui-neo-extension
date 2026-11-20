@@ -48,3 +48,5 @@ Terms in plain words. A new term comes up in conversation — add it here right 
 - **LAB color correction** — matching the colors of the result to the input in LAB color space, to avoid color shift.
 - **Text embeddings (`pos_emb.pt`, `neg_emb.pt`)** — precomputed prompt vectors; SeedVR2 takes no user prompt.
 - **sdpa** — PyTorch's built-in scaled dot-product attention; the default attention backend.
+- **Output size mode** — how the result size is chosen: Scale factor (×1–×4 of each image, the UI default ×2), Shortest edge (one shortest side in px for every image, the API default) or Long edge (the longest side in px).
+- **Size line** — the line under the size controls naming the final output size before Generate; computed with the same rules as the run.

@@ -138,6 +138,25 @@ Why: the user's setting must hold for the upscaled images too. Read from the opt
 Why: the UI cannot send more than the sliders allow, an API call could (an unbounded resolution means unbounded
 memory). One set of bounds (`seedvr2_neo/upscale_settings.py`) builds the sliders and checks the values.
 
+### New script arguments go at the end of `script_args`, with defaults that keep the old behaviour
+Why: API callers pass the arguments by position, and Forge does not pad a shorter list with the UI's values. Appended
+parameters with Python defaults, read leniently, let an older caller's list keep working; a test checks the order
+against the UI.
+
+### Output size: three modes, the UI starts in "Scale factor ×2", the API falls back to the shortest edge
+Why: "×2" or "2K wide" had to be worked out by hand for every input size. A scale factor and a long edge in px are
+added; the UI starts in the scale factor mode at ×2 (owner's choice: the most natural way to say how big), listed
+first. An API call that sends no mode or an unknown one gets the shortest edge, so callers written before the modes
+keep their size. The shortest-edge slider keeps its label and default, so its saved value still applies when that
+mode is chosen. The mode itself is not kept in `ui-config.json` (`do_not_save_to_config`): a saved mode would be
+applied after the UI is built and disagree with the visible slider, so the UI always starts in Scale factor. Each input size gets its own resolution (passes are per size anyway). The final size is shown under
+the controls before a run. A px long edge, not "2K / 4K" buttons: the names invite
+"8K" next, and "4K" on the shortest edge would give a 6827 px wide 16:9 image. In the new modes the long edge cap
+(3840 or the chosen long edge) is the pipeline's limit and wins over everything else: a small image is raised towards a
+512 px shortest edge (the slider never went below 512, smaller sizes are not checked with the model) only while the
+long edge stays within the cap, so a panorama is never made smaller than asked to reach 512. Long edge mode therefore
+never raises: its cap is the chosen long edge.
+
 ### Interruption checks only `shared.state.interrupted`
 Why (*reconstructed from code*): the original author removed the `stopping_generation` check deliberately. Likely reason:
 "Stop generating" in Forge means "finish the current image", which should not abort the upscale.
@@ -182,7 +201,9 @@ must use the new one. Any later default change meets the same `ui-config.json` t
 ### No 6K / 8K output sizes until the DiT works in tiles
 Why: the DiT sees the whole image; 8K is 33 MP, eight times an output that already takes minutes on an 8 GB GPU, and
 the resolution slider would clamp it silently. Offering it would mislead users. Agreed with the owner; DiT tiling is a
-separate block, after which the larger sizes are added.
+separate block, after which the larger sizes are added. Until then the scale factor and long edge modes cap the output
+long edge at 3840 px; the shortest-edge slider keeps its old range (up to 3840 on the shortest edge), so as not to
+change existing users' settings.
 
 ### Fixed pipeline settings: batch 1, LAB color correction, `sdpa`, no `torch.compile`
 Why (*reconstructed from code*): the simplest configuration that works without optional packages.
