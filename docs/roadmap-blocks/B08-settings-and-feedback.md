@@ -1,11 +1,12 @@
 # B08 — Settings and feedback
 
-**Status:** ⬜ not started (draft card: criteria to be agreed with the owner)
+**Status:** 🔄 in progress — code, tests, docs and live checks done; waiting for `/block-done`
 **Weight:** 3 (from `docs/03-ROADMAP.md`)
-**Decisions this block rests on:** "Fixed pipeline settings: batch 1, LAB color correction, `sdpa`, no `torch.compile`";
-"Interruption checks only `shared.state.interrupted`"; "BlockSwap is a manual slider with a note for 7B on small GPUs";
-"VAE tile 512 is the default"; "New script arguments go at the end of `script_args`"; "API values of the numeric
-settings are clamped to the slider ranges".
+**Decisions this block rests on:** "Fixed pipeline settings: batch 1, no `torch.compile`"; "Interruption checks only
+`shared.state.interrupted`"; "BlockSwap is a manual slider with a note for 7B on small GPUs"; "VAE tile 512 is the
+default"; "New script arguments go at the end of `script_args`"; "API values of the numeric settings are clamped to
+the slider ranges". New in this block: the title, hooks on container modules, the progress bar, color correction and
+attention, GPU profiles (`05-DECISIONS.md`).
 
 ## Why this block
 Today a SeedVR2 run is a black box: no progress in Forge's bar, Interrupt waits for the whole DiT pass, color
@@ -13,34 +14,34 @@ correction and attention are fixed, and an owner of a 12 or 24 GB GPU has to gue
 block the run is visible and stoppable, and the main settings are one choice away.
 
 ## What we do (steps)
-1. Forge progress bar: map the four phases (encode / DiT / decode / postprocess) and their batches onto
-   `shared.state` (per the fact-check), in `seedvr2_neo/` through `HostHooks`, no Forge import there.
-2. Interrupt inside the DiT step: a forward pre-hook on each DiT block (`self.blocks`, 32 in 3B, 36 in 7B) that raises
-   when `shared.state.interrupted`; registered for the run and always removed (cached models keep no hook). Plus
-   `ctx['interrupt_fn']` for the checks at the top of each batch. No `seedvr2_vendor/` patch.
-3. Color correction choice under "Advanced Settings": `lab` (default) / `wavelet` / `wavelet_adaptive` / `hsv` /
-   `adain` / `none`; written to the infotext; API value validated (unknown → `lab`).
-4. Attention mode under "Advanced Settings": `sdpa` (default) plus only the backends whose packages import
-   (`compatibility.py` flags); an unavailable API value falls back to `sdpa` with a console note.
-5. New title without "(24G)" (wording to agree) — with the compatibility consequences from the fact-check (API
-   `script_name`, ui-config keys, elem_ids).
-6. GPU profiles 8 / 12 / 24 GB: a dropdown that fills VAE tile size (and overlap) and BlockSwap; the sliders stay
-   visible and editable; "Custom" when the user moves a slider. The profile itself is not a script argument.
-7. Tests for each step in the mirrored folders; docs (`02-ARCHITECTURE`, `05-DECISIONS`, `09-PROCESSES`, README).
-8. Live check on the 8 GB GPU through the Forge API: progress moves, Interrupt mid-DiT frees VRAM within seconds,
-   each color correction gives an image.
+1. ✅ Forge progress bar: `seedvr2_neo/run_progress.py` (passes, weighted phases, batches, DiT blocks) → `HostHooks.report_progress`
+   → `sampling_step` / `textinfo`; the upscale is job 1 of 1 unless Forge is inside its own job (img2img Batch).
+2. ✅ Interrupt inside a phase: forward pre-hooks on the container modules of the VAE and the DiT (set before the
+   phases, always removed) plus `ctx['interrupt_fn']`. No `seedvr2_vendor/` patch. A process-wide hook was tried
+   first and dropped (it runs before every layer).
+3. ✅ Color correction choice (6 methods, `lab` default), in the infotext; unknown API value → `lab`.
+4. ✅ Attention choice: `sdpa` plus installed backends; a backend that does not import → `sdpa` with a console note;
+   the infotext names the backend used.
+5. ✅ Title "SeedVR2 Upscaler"; README tells API users the new name (old one → HTTP 422).
+6. ✅ GPU profiles Manual / 8 / 12 / 24 GB fill BlockSwap (by 3B / 7B), tile size and overlap; moving a slider → Manual;
+   not a script argument, not saved.
+7. ✅ Tests (mirrored folders) and docs (`02-ARCHITECTURE`, `05-DECISIONS`, `07-RISKS`, `08-GLOSSARY`, `09-PROCESSES`,
+   `external-apis/seedvr2-upstream.md`, README, `06-IDEAS`).
+8. ✅ Live check on the 8 GB GPU through the Forge API (3B GGUF Q6_K, `--cuda-malloc`).
 
 ## Acceptance criteria
-- [ ] During a run Forge's progress bar moves through the phases (live screenshot / `/internal/progress` polled).
-- [ ] Interrupt pressed during the DiT phase stops the run before the phase ends (live: time from Interrupt to the
-      end of the run is seconds, not the full DiT time); VRAM is released; inputs come back un-upscaled.
-- [ ] No hook stays on a cached DiT after a run, a failure or an interrupt (test).
-- [ ] Color correction and attention mode are selectable, saved in the infotext, and API calls without them keep the
-      old behaviour (`lab`, `sdpa`) (tests).
-- [ ] The Script title has no "(24G)"; the compatibility effects found by the fact-check are handled or documented.
-- [ ] Choosing a GPU profile changes the tile and BlockSwap sliders; the sliders still change freely (test of the
-      profile table; live look at the UI).
-- [ ] All tests pass (`python -m pytest tests`), CI green.
+- [x] During a run Forge's progress bar moves through the phases: `/internal/progress` polled — 0 → 0.01 (encode)
+      → 0.128 → 0.422 (inside the DiT step) → 0.598 → 0.951 → done.
+- [x] Interrupt pressed during the DiT phase stops the run before the phase ends: 3.7 s from Interrupt to the end
+      (models unloaded, VRAM 3.6 → 0.8 GB); during the decode 0.6 s (7.9 → 0.8 GB); during the encode 1.2 s; the
+      inputs come back with `SeedVR2 Error: Interrupted`.
+- [x] No hook stays on the models after a run, a failure or an interrupt (`test_no_hook_is_left_on_the_models_…`).
+- [x] Color correction and attention mode are selectable, saved in the infotext, and API calls without them keep the
+      old behaviour (`lab`, `sdpa`) (tests; live run of every color correction).
+- [x] The Script title has no "(24G)"; the compatibility effects are documented (README, `07-RISKS.md`).
+- [x] Choosing a GPU profile changes the tile and BlockSwap sliders; the sliders still change freely (tests). The
+      owner's look at the UI is still open.
+- [x] All tests pass (`python -m pytest tests`): 2583 passed, 1 skipped, 3 xfailed. CI: on push.
 
 ## Which checks are needed on `/block-done`
 Always: `code-auditor`, `fresh-eyes-reviewer`, `plan-drift-checker`. Additionally:
@@ -56,18 +57,15 @@ B11 closed (UI layout). Live checks: Claude launches the owner's Forge with `--a
 - Automatic BlockSwap from detected VRAM (decided: manual; profiles only fill the sliders when chosen).
 - `torch.compile`, fp16 compute (`06-IDEAS.md`).
 - Settings in Forge's Settings tab (`06-IDEAS.md`).
+- Progress per VAE tile (the vendored decode reports nothing per tile; `07-RISKS.md`).
 
 ## Hidden assumptions
-- `check_interrupt(ctx)` in the vendored phases runs only at the top of each batch loop, the same granularity as
-  `progress_callback`; with batch 1 the DiT phase is one batch, so a real mid-DiT stop needs the block hook (step 2).
-- BlockSwap wraps the DiT blocks' forward; the hook must work with and without BlockSwap (to check in tests and live).
-- Progress (fact-check, `external-apis/forge-neo.md`): the bar is `job_no/job_count + sampling_step/sampling_steps /
-  job_count`; after `process_images` it reads 100%, so we must write the fields ourselves. Writing `job_count` breaks
-  img2img Batch's outer bar and turns Interrupt into a soft stop when `job_count > 1` — so the plan is to move only
-  `sampling_step` / `sampling_steps` (and `textinfo`), never `job_count`; no `state.begin()/end()`.
-- Title (fact-check): ui-config control values survive (keyed by file name); API `script_name` with the old title gets
-  HTTP 422; the saved "Script" dropdown choice and pasted `Script:` infotext stop selecting it; the generated
-  `elem_id`s change (ours: the refresh button only).
+- The vendored loaders keep module objects (`assign=True`; GGUF swaps only Linear layers), so hooks set before a phase
+  fire inside it — confirmed live (Interrupt mid-DiT and mid-decode, per-block progress). An upstream sync may break it
+  (`07-RISKS.md`).
+- A forward pre-hook that returns a value replaces the module's inputs; ours always returns None (found by a test).
+- The slow decode with `--cuda-malloc` (~2.5–3 min for 1024×768) is the same on `main` (220.8 s vs 192.6 s with B08):
+  not caused by the hooks (`07-RISKS.md` R6).
 
 ## Open questions
-See the report on `/go`.
+- The owner's look at the UI (GPU profile next to BlockSwap, the two new dropdowns in Advanced Settings).

@@ -45,9 +45,27 @@ Changes we made to vendored files. Re-apply after every upstream sync. Each code
   then fall back to the CPU, so cached models wait in system RAM (live: DiT CPU→GPU 11.8 s on the next run), while the
   VAE stays in VRAM during the DiT step. Source: upstream source, `seedvr2_vendor/optimization/memory_manager.py`.
 - **BlockSwap and `swap_io_components` require a DiT offload device.** Source: `inference_cli.py` help, `dit_model_loader.py`.
-- **Interrupt hook:** `setup_generation_context` sets `ctx['interrupt_fn']` only when ComfyUI is importable; outside ComfyUI it is `None`
-  and the phases check interruption only through `progress_callback`. Setting `ctx['interrupt_fn']` to a Forge check gives
-  interruption inside the phases. Source: `seedvr2_vendor/core/generation_utils.py`, `check_interrupt`.
+- **Interrupt hook:** `setup_generation_context` sets `ctx['interrupt_fn']` only when ComfyUI is importable; outside ComfyUI it is `None`.
+  The phases call `check_interrupt(ctx)` (which calls it) at the top of each batch loop and `progress_callback(current,
+  total, …)` after each batch — the same granularity: with batch 1 a whole image's DiT step or tiled decode runs with
+  no check. Source: `seedvr2_vendor/core/generation_utils.py` (`check_interrupt`), `generation_phases.py`.
+- **Model objects survive weight loading.** `runner.dit` / `runner.vae` exist on the meta device after
+  `prepare_runner`; `materialize_model` (in the phase) loads weights with `load_state_dict(state, strict=False,
+  assign=True)`, and GGUF replaces only Linear layers (`replace_linear_with_quantized`), so container modules (DiT
+  blocks, VAE stages) are the same objects before and after, and hooks set on them before a phase fire inside it. The
+  DiT may be wrapped later (`FP8CompatibleDiT`, the model at `.dit_model`); BlockSwap replaces each block's `forward`
+  but blocks are still called through `__call__`, so hooks fire. Sources: `core/model_loader.py`
+  (`_load_standard_weights`, `_load_gguf_weights`), `core/model_configuration.py`, `optimization/compatibility.py`,
+  `optimization/blockswap.py`. The DiT body runs `for block in self.blocks: … module(...)`
+  (`models/dit_*/nadit.py`, `gradient_checkpointing` calls the module directly).
+- **Tiled VAE decode** calls `self.decoder(...)` once per tile (`tiled_decode` → `slicing_decode` → `_decode`,
+  `models/video_vae_v3/modules/attn_video_vae.py`).
+- **Attention backends** are imported at module level in `optimization/compatibility.py`, with flags
+  `FLASH_ATTN_2_AVAILABLE` (`flash_attn` + `flash_attn_2_cuda`), `FLASH_ATTN_3_AVAILABLE` (`flash_attn_interface`),
+  `SAGE_ATTN_2_AVAILABLE` (`sageattention.sageattn_varlen`), `SAGE_ATTN_3_AVAILABLE` (`sageattn3`, or
+  `sageattention.sageattn_blackwell`). `validate_attention_mode` falls back to `sdpa` with a warning for an
+  unavailable one. Color correction methods of the postprocess phase: `lab`, `wavelet`, `wavelet_adaptive`, `hsv`,
+  `adain`, `none` (`core/generation_phases.py`; the ComfyUI node's list in `interfaces/video_upscaler.py`).
 - **Config by file name (upstream):** `configs_7b` if `"7b" in dit_model` (case-sensitive), else `configs_3b` — replaced
   here by a local patch. Source: `seedvr2_vendor/core/model_configuration.py`.
 - **Model lookup (upstream):** `find_model_file` searches ComfyUI `folder_paths` if present, else `./models/SEEDVR2` relative

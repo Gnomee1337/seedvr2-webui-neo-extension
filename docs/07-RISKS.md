@@ -66,6 +66,8 @@ Live-checked on an 8 GB GPU without bf16, 16 GB RAM, 1080px output, VAE tile 512
   512 the decode reserves 8.7 GB for a 5.2 GB peak, pages 0.7–2.9 GB and takes 25–137 s; without the flag 6.7 GB
   reserved, no spill, 12.4 s. At 1024px shortest edge (img2img 512×384 → 1364×1024, 3B GGUF Q6_K, tile 512/128): decode
   68–77 s with the flag, 15.7 s without; encode 12–14 s either way; the whole run 128 s vs 68 s, peak 7.8–7.9 GB used.
+  On the current Forge (PyTorch 2.13) ×2 of 512×384 → 1024×768 with the flag decoded for 2.5–3 min of a 190–220 s
+  run, the same with and without the progress / Interrupt hooks (`main` 220.8 s).
   With the old default tile 1024 the same case could run 6–22+ minutes without finishing — the reason 512 is the
   default. The flag is opt-in in Forge but common on 8 GB setups; it makes the 7B DiT step faster
   with few BlockSwap blocks (8 blocks: 21 s vs 122 s). README gives the trade-off. Close: release the cache inside the
@@ -158,8 +160,19 @@ Live-checked on an 8 GB GPU without bf16, 16 GB RAM, 1080px output, VAE tile 512
   `Processed` (and its comments) of the first file only; each image's infotext still has `SeedVR2 Error`.
 - 🟢 R1 (S1×L1) **A 16-bit grayscale PNG loses its transparency key** (it is scaled correctly, but comes back opaque).
   Repro: `test_16_bit_png_with_transparency_is_scaled_and_keeps_alpha` (strict xfail).
-- 🟢 R3 (S1×L3) **Interrupt reacts only between phases** and the Forge progress bar is not updated during SeedVR2.
-  Close: set `ctx['interrupt_fn']` to a Forge check and update `shared.state.job*` from `progress_callback`. (B08)
+- 🟡 R4 (S2×L2) **API calls with the old `script_name` "SeedVR2 Native Upscaler (24G)" fail with HTTP 422** since the
+  title became "SeedVR2 Upscaler" (Forge has no title alias). README names the new title; the UI's Script dropdown
+  starts at None once after the update.
+- 🟢 R3 (S1×L3) **The progress bar stands still during a VAE phase of one image** (the VAE reports nothing per tile)
+  and the phase weights are rough shares of a run on 8 GB, so Forge's ETA is approximate; with `--cuda-malloc` the
+  decode takes far longer than its weight. The DiT phase moves per block.
+- 🟢 R2 (S1×L2) **The 12 and 24 GB GPU profiles are not measured** (tile 768 / 1024, 7B BlockSwap 8 / 0). The UI says
+  so; a profile only fills sliders the user sees.
+- 🟢 R2 (S1×L2) **Interrupt and progress inside a phase depend on the vendored model structure:** `runner.dit` (or its
+  `dit_model`) with `blocks`, `runner.vae`, and loaders that keep module objects (`load_state_dict(assign=True)`;
+  GGUF swaps only Linear layers). An upstream sync that rebuilds modules at load time leaves Interrupt between batches
+  only and the DiT phase without per-block progress, with no error. Check live after an upstream sync: Interrupt
+  during the DiT step stops the run within seconds.
 
 ## 5. Code hygiene
 - 🟢 R3 (S3×L1) **"Reload UI" after a manual `git pull` can drop the script until a restart.** Reload keeps the old
@@ -190,9 +203,6 @@ Live-checked on an 8 GB GPU without bf16, 16 GB RAM, 1080px output, VAE tile 512
   another extension's real `src` package. Users may delete it by hand.
 - 🟢 R2 (S1×L2) **Manual `git pull` can stop on the removed `.pyc` files** that Python rewrote locally. Forge's own update
   is not affected (`external-apis/forge-neo.md`); the README gives `git reset --hard origin/main`.
-- 🟢 R2 (S1×L2) **Same Script title as the original SeedVR2 Forge extension** ("SeedVR2 Native Upscaler (24G)"): with both
-  installed the entries look alike, and `run()` matches scripts by title when it removes itself before txt2img. README
-  asks to install only one; the title changes in B08.
 - 🟢 R2 (S1×L2) **An API call with a short `script_args` fails with HTTP 500.** Forge replaces the script's slice with
   the list sent instead of padding it with defaults, so `run()` misses required parameters (`external-apis/forge-neo.md`).
   API callers have to send all arguments; the error is immediate and nothing runs. Close: defaults for `run()`'s trailing

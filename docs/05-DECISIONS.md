@@ -103,6 +103,11 @@ cheap to read and exact. The file name is only a fallback when the header cannot
 Why (*reconstructed from code*): a Script owns `run()` and can replace the whole generation, which lets img2img skip
 diffusion and txt2img chain "generate → upscale" in one click.
 
+### The Script is titled "SeedVR2 Upscaler"; the old title is not kept as an alias
+Why: the owner's choice. "(24G)" named a VRAM class the extension no longer needs, and the same title as the original
+extension made the two look alike in the dropdown. Forge has no alias for a title: API calls with the old
+`script_name` get HTTP 422, and the Script dropdown starts at None once; README tells API users the new name.
+
 ### txt2img calls `process_images` from inside `run()`
 Why (*reconstructed from code*): the base image must be produced by Forge with all other extensions applied; the script is
 removed from `p.scripts.scripts` for that call and restored in `finally`.
@@ -161,6 +166,19 @@ never raises: its cap is the chosen long edge.
 Why (*reconstructed from code*): the original author removed the `stopping_generation` check deliberately. Likely reason:
 "Stop generating" in Forge means "finish the current image", which should not abort the upscale.
 
+### Interrupt and progress inside a phase come from hooks on the models' container modules
+Why: the vendored pipeline checks Interrupt and reports progress only between batches, and one image can spend minutes
+in the DiT or the tiled VAE decode. Forward pre-hooks on the modules that hold other modules (VAE stages, DiT blocks)
+stop a run within seconds and move the bar per DiT block, without patching `seedvr2_vendor/`. Not a hook on every
+layer or torch's process-wide hook: those run millions of times per decode. The hooks are set before the phases (the
+vendored loaders keep these module objects) and always removed, so cached models keep none.
+
+### Forge's progress bar: the upscale moves `sampling_step`, and becomes a job of its own only when Forge has none left
+Why: Forge's bar is `job_no / job_count` plus the current job's steps. After txt2img every job is done and a single
+img2img has no job count, so the upscale becomes job 1 of 1; in img2img Batch Forge counts the files, and its counter
+stays. `job_count` is never raised above 1: Forge's Interrupt button behaves differently for several jobs. Phases are
+weighted by their rough share of a run's time (`seedvr2_neo/run_progress.py`).
+
 ## VRAM and caching
 
 ### Unload the SD checkpoint before SeedVR2 by default
@@ -180,6 +198,12 @@ The generation context is built fresh every run for the same reason (and it is c
 ### The cached models are trusted only for the same files (path, size, modification time)
 Why: the vendored cache matches by file name; a same-named file in the other model folder or a replaced file would
 reuse old weights. Our check lives in `seedvr2_neo/`, the vendored cache stays unpatched.
+
+### GPU profiles fill the memory sliders once; they are not a script argument
+Why: the owner wanted 8 / 12 / 24 GB presets that stay visible and editable. A profile only sets BlockSwap (by the
+selected DiT: 3B or 7B), VAE tile size and overlap; moving a slider sets it back to Manual, and the profile is not saved
+in `ui-config.json`. An API call and the infotext carry the slider values, never the profile. Only the 8 GB values are
+measured; the 12 / 24 GB ones say so in the UI.
 
 ### BlockSwap is a manual slider with a note for 7B on small GPUs, not an automatic setting
 Why: the owner's choice. The right block count depends on the GPU, the model, the resolution and even the PyTorch
@@ -205,5 +229,11 @@ separate block, after which the larger sizes are added. Until then the scale fac
 long edge at 3840 px; the shortest-edge slider keeps its old range (up to 3840 on the shortest edge), so as not to
 change existing users' settings.
 
-### Fixed pipeline settings: batch 1, LAB color correction, `sdpa`, no `torch.compile`
+### Fixed pipeline settings: batch 1, no `torch.compile`
 Why (*reconstructed from code*): the simplest configuration that works without optional packages.
+
+### Color correction and attention are choices under Advanced Settings, defaulting to LAB and `sdpa`
+Why: they change the look or the speed but no default run needs them; API calls without them keep the values every run
+used before. The attention list shows only backends whose package is installed (looked up without importing it, so
+building the UI loads nothing); a run checks the vendored pipeline's own import result and falls back to `sdpa` with a
+console note, and the infotext names the backend actually used.

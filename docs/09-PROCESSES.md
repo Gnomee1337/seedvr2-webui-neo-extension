@@ -35,9 +35,15 @@ The source of truth is the code.
 6. Controls: the size group — output size mode (Scale factor — default, ×2 / Shortest edge / Long edge) with only
    the chosen mode's control shown: resolution (shortest edge, 512–3840), scale factor (×1.0–×4.0, quick ×1.5 / ×2 / ×4
    buttons), long edge (1024–3840 px) — and the output size line; "After run" (Unload SeedVR2 — default / Keep in
-   RAM), unload SD; BlockSwap blocks (0–36), BlockSwap I/O layers (BlockSwap is on when either is set);
+   RAM), unload SD; GPU profile, BlockSwap blocks (0–36), BlockSwap I/O layers (BlockSwap is on when either is set);
    "Advanced Settings": seed, save original, force reload, debug logs, input/latent noise, VAE tiling, tile size and
-   overlap. The order on screen is not the order of `run()`'s arguments (that is the returned list).
+   overlap, color correction (6 methods, `lab` default), attention (`sdpa` plus the backends whose package is
+   installed, looked up without importing). The order on screen is not the order of `run()`'s arguments (that is the
+   returned list).
+8. GPU profile (`seedvr2_neo/gpu_profiles.py`, `apply_gpu_profile` in the script): Manual (default, not saved in
+   `ui-config.json`) / 8 / 12 / 24 GB. Choosing a profile, or changing the DiT while one is chosen, sets BlockSwap (by
+   the DiT's size from its header; no listed DiT counts as 3B), VAE tile size and overlap; moving one of those sliders
+   by hand (Gradio's `.input`, not the profile's own update) sets the profile back to Manual. Not a `run()` argument.
 7. Output size line (`seedvr2_neo/size_preview.py`): the size the upscale will give, from the same rules as the run.
    txt2img: from Forge's width, height and Hires. fix controls (found by `elem_id` in `Script.after_component`;
    Hires. fix size by Forge's formula, rounded to `res_step`), updated on any change of them or of the size
@@ -83,6 +89,9 @@ The source of truth is the code.
    (`parse_upscale_settings` in `seedvr2_neo/upscale_settings.py`; resolution 512–3840, scale factor 1–4, long edge
    1024–3840, noise 0–1, tile 512–2048, overlap 64–512 and at most half the tile); an unreadable API value takes the
    slider's default, a missing or unknown size mode means Shortest edge (`FALLBACK_SIZE_MODE`; the UI starts in Scale factor). Omitted size arguments (older API callers) → Shortest edge.
+   Color correction and attention (`resolve_pipeline_options` in the script, `seedvr2_neo/pipeline_options.py`): a
+   missing or unknown value → `lab` / `sdpa`; a backend whose package the vendored pipeline could not import → `sdpa`,
+   with a console line.
 1. Seed: the UI value, or for `-1` — the first generated image's seed (txt2img), else `p.seed`, else random. One seed
    for all images of the run. A typed seed outside 0 … 2³²−1 (the pipeline also seeds numpy) or not a number counts as
    `-1`, with a console line.
@@ -112,12 +121,17 @@ The source of truth is the code.
 8. Per pass (`UpscaleRun._upscale_tensor`): a new generation context on Forge's device (`modules.devices.device`), tensors offloaded to CPU.
    `prepare_runner`: DiT/VAE taken from the cache if the file name matches, otherwise loaded from the folder of
    process 2; config `configs_7b` for 36 transformer blocks in the checkpoint header, `configs_3b` for 32 (header
-   unreadable → `7b` in the file name, any case). Tiling and BlockSwap from the UI.
-   Fixed: `sdpa` attention, no `torch.compile`.
+   unreadable → `7b` in the file name, any case). Tiling, BlockSwap and attention from the UI.
+   Fixed: no `torch.compile`.
    Compute dtype is bf16 whenever the bf16 probe passes, including GPUs that only emulate it.
 9. Phases 1–4 over all frames of the pass, each frame on its own (batch 1, no overlap): encode (VAE) → upscale (DiT,
-   one step; text embeddings loaded here) → decode (VAE) → post-process (LAB color correction). Interruption is checked
-   between phases and between passes. After each of the first three phases dropped objects are collected and the
+   one step; text embeddings loaded here) → decode (VAE) → post-process (the chosen color correction). Interrupt is
+   checked between passes, between batches (the pipeline's callback and `ctx['interrupt_fn']`) and before every
+   container module of the VAE and the DiT (forward pre-hooks set for the four phases and always removed), so a run
+   stops within seconds even inside the DiT step or a tiled decode. Progress (`seedvr2_neo/run_progress.py`): before
+   the run the script makes the upscale job 1 of 1 unless Forge is inside a job of its own (img2img Batch), then
+   `shared.state.sampling_step` (of 1000) follows the share done — passes by their images, phases by weight, batches,
+   and each DiT block — and `shared.state.textinfo` names the phase (and the pass when there are several). After each of the first three phases dropped objects are collected and the
    allocator's cached VRAM is returned (`gc.collect()` + `devices.torch_gc()`). A model that is not cached is dropped
    straight from the GPU, without a copy to RAM (local patch, `external-apis/seedvr2-upstream.md`); with "Unload" the
    next pass loads it again.
@@ -128,8 +142,9 @@ The source of truth is the code.
 12. Result (`build_result` in the script, `finish_images` in `seedvr2_neo/run_results.py`): one image and one infotext per input, in input order. The infotext is the
    base one (`BaseInfotext` in `seedvr2_neo/run_results.py`: Forge's infotext of the generated image in txt2img; the
    prompt and `Negative prompt:` line in img2img) with `SeedVR2 Model`, `SeedVR2 VAE`, `SeedVR2 Resolution` (the shortest
-   edge this input was upscaled to), `SeedVR2 Seed`, `SeedVR2 Size Mode` and, by mode, `SeedVR2 Scale` or
-   `SeedVR2 Long Edge` added to its parameters line. Forge's `create_infotext` is not used: it reads the SD model, which is
+   edge this input was upscaled to), `SeedVR2 Seed`, `SeedVR2 Size Mode`, by mode `SeedVR2 Scale` or
+   `SeedVR2 Long Edge`, then `SeedVR2 Color Correction` and `SeedVR2 Attention` (the backend used) added to its
+   parameters line. Forge's `create_infotext` is not used: it reads the SD model, which is
    unloaded (or never loaded) by then. The infotext is also put into each returned image's `info["parameters"]`
    (with `enable_pnginfo`), so unsaved gallery and API images carry it. An upscaled image is saved to
    `p.outpath_samples` with `-seedvr2` by the saving plan (`samples_format` and `save_to_dirs` from the request's
