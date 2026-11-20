@@ -14,6 +14,7 @@ import re
 from dataclasses import FrozenInstanceError
 
 import pytest
+from PIL import Image
 
 from seedvr2_neo import run_results as rr
 from seedvr2_neo.upscale_settings import parse_upscale_settings
@@ -373,3 +374,55 @@ def test_merge_does_not_mutate_its_arguments():
     rr.merge_run_images(inputs, upscaled)
 
     assert inputs == ["a", "b"] and upscaled == {0: "A"}
+
+
+# --- per-image size parameters (output size modes) -------------------------------------------------------------------
+
+SIZE_GARBAGE = [None, "", "Long edge, Steps: 999", "Scale factor\nNegative prompt: x", "\"", float("nan"), -1, 10 ** 9,
+                True, [], "💥"]
+SIZE_KEYS = {"SeedVR2 Size Mode", "SeedVR2 Scale", "SeedVR2 Long Edge"}
+
+
+@pytest.mark.parametrize("value", SIZE_GARBAGE, ids=lambda value: repr(value)[:30])
+@pytest.mark.parametrize("size", [(1, 1), (512, 384), (1000, 16000), (16000, 1000), (20000, 20000)])
+def test_size_params_from_any_api_values_read_back_in_forge(value, size):
+    for size_mode in (value, "Scale factor", "Long edge", "Shortest edge"):
+        settings = parse_upscale_settings(value, 0.0, 0.0, True, 512, 128, size_mode, value, value)
+        params = rr.seedvr2_generation_params("d", "v", settings, size, 7)
+        infotext = rr.BaseInfotext.from_prompt("a cat", "").with_params(params)
+        _, _, parsed = parse_like_forge(infotext)
+
+        assert parsed["SeedVR2 Size Mode"] == settings.size_mode.value
+        assert parsed["SeedVR2 Resolution"] == str(settings.target_for(size).resolution)
+        assert "Steps" not in parsed and "Negative prompt" not in infotext  # nothing of the raw value leaks in
+        mode_keys = {key for key in parsed if key in SIZE_KEYS}
+        expected = {"SeedVR2 Size Mode"} | ({"SeedVR2 Scale"} if settings.size_mode.value == "Scale factor" else
+                                            {"SeedVR2 Long Edge"} if settings.size_mode.value == "Long edge" else set())
+        assert mode_keys == expected
+
+
+def test_each_image_of_a_mixed_batch_carries_its_own_resolution():
+    settings = parse_upscale_settings(1080, 0.0, 0.0, True, 512, 128, "Scale factor", 2.0, 2048)
+    sizes = [(512, 384), (1024, 768), (200, 200), (512, 384)]
+    params = [rr.seedvr2_generation_params("d", "v", settings, size, 7) for size in sizes]
+    images = [rr.RunImage(f"up{index}", True) for index in range(len(sizes))]
+    details = rr.describe_uploaded_inputs(7, "a dog", "", len(sizes))
+
+    results = rr.finish_images(images, details, params, None, embed_infotext=False)
+
+    resolutions = [parse_like_forge(result.infotext)[2]["SeedVR2 Resolution"] for result in results]
+    assert resolutions == ["768", "1536", "512", "768"]
+
+
+def test_a_failed_image_of_a_mixed_batch_keeps_its_own_size_params_and_the_error():
+    settings = parse_upscale_settings(1080, 0.0, 0.0, True, 512, 128, "Long edge", 2.0, 1024)
+    sizes = [(512, 384), (2000, 1000)]
+    params = [rr.seedvr2_generation_params("d", "v", settings, size, 7) for size in sizes]
+    images = [rr.RunImage(Image.new("RGB", (4, 4)), True), rr.RunImage(Image.new("RGB", (4, 4)), False)]
+
+    results = rr.finish_images(images, rr.describe_uploaded_inputs(7, "a", "", 2), params, "Runtime Error: X", False)
+
+    first, second = (parse_like_forge(result.infotext)[2] for result in results)
+    assert "SeedVR2 Error" not in first and second["SeedVR2 Error"] == "Runtime Error: X"
+    assert (first["SeedVR2 Resolution"], second["SeedVR2 Resolution"]) == ("768", "512")
+    assert first["SeedVR2 Long Edge"] == second["SeedVR2 Long Edge"] == "1024"
