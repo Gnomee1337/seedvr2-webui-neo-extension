@@ -212,6 +212,13 @@ value either wastes speed or still overflows. The note recommends 16 blocks, the
 allocators (34–42 s). BlockSwap on also moves the VAE to RAM during the DiT step: when VRAM is short, the idle VAE
 should not hold it. The note's threshold (11 GiB) is the 7B fp8 weights (~7.9 GB) plus activations at 1080p.
 
+### With `--cuda-malloc` the decode returns the unused VRAM pool before each decoder stage, under 3 GB free
+Why: `cudaMallocAsync` never shrinks its pool on its own; during a tiled decode on 8 GB it reserved 8.7 GB for a
+5.2 GB peak and Windows moved the excess into shared memory (decode 2–3× slower). Once per tile still spilled on
+2048²; before each decoder stage did not. The free-memory condition (2 GB still spilled, 3 GB did not) keeps GPUs
+with room to spare from paying the synchronisation; the native allocator never spills here and trimming would only
+slow it (8–20%), so it is left alone. Automatic, no setting: the user cannot choose anything better.
+
 ### VAE tile 512 is the default, on a slider labelled "VAE Tile Size"
 Why: with 1024 and `--cuda-malloc` a VAE phase on an 8 GB GPU could run for many minutes; 512/128 is measured clean
 and finishes (07-RISKS, VRAM section). Forge keeps a slider's value in `ui-config.json` under its label and prefers it to the code

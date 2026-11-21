@@ -118,6 +118,12 @@ Source: `modules/processing.py`.
     parsed separately and counts as a native-specific option, so with both set PyTorch emits a warning that `backend:cudaMallocAsync`
     ignores the native options. `CUDAMallocAsyncAllocator.cpp` never mentions `expandable_segments`, so with the async backend
     active it has no effect (inferred from the two files; the allocator selection code itself was not read).
+- **Verified live in Forge Neo (PyTorch 2.13.0+cu130, Windows, 8 GB GPU):** `torch.cuda.get_allocator_backend()` returns
+  `cudaMallocAsync` with `PYTORCH_CUDA_ALLOC_CONF=backend:cudaMallocAsync` (what `--cuda-malloc` sets) and `native` without it.
+  Under it a tiled VAE decode left `memory_reserved()` at 8.7 GB for a 5.2 GB peak, `mem_get_info()` reported 0 free, and the
+  Windows counter "GPU Adapter Memory\Shared Usage" grew by 1.6–1.8 GB during the decode (the pool spilled into shared
+  memory). `torch.cuda.empty_cache()` before decoder stages kept reserved at 1.5–4.8 GB and removed the shared growth;
+  with the native allocator the same decode reserved 6.7 GB with no shared growth. Numbers: `07-RISKS.md` §3.
 - **Windows "CUDA - Sysmem Fallback Policy":** a driver feature since 536.40 (shared system memory is used when VRAM runs out:
   the app keeps running, slower); since driver 546.01 a per-application NVIDIA Control Panel setting (Manage 3D settings >
   Program Settings > python.exe > "CUDA - Sysmem Fallback Policy" = "Prefer No Sysmem Fallback") turns it off, at the cost of an
@@ -545,13 +551,8 @@ install's venv.
 - The launch flag name: `backend/args.py` defines `--gpu-device-id`, while a read of `modules/cmd_args.py` showed `--device-id`
   (str); which one Neo's launcher actually accepts, and whether both exist, was not settled.
 - Where `unload_all_models()` puts the weights (CPU RAM or dropped): `backend/patcher/base` (`detach`, `partially_unload`) not read.
-- `cudaMallocAsync` live checks (the source reading is above; the PyTorch version Forge Neo ships was not matched to v2.8.0):
-  with `--cuda-malloc` allocate, free, `empty_cache()`, and compare `nvidia-smi`, `memory_reserved()` and `mem_get_info()`
-  (what `mem_get_info` reports for sysmem-spilled pool memory is not documented); whether `empty_cache()` between tiles removes the
-  spill and what it costs in time; whether `cudaMemPoolSetAttribute` via ctypes on the default pool is accepted at runtime.
-- Whether cudaMallocAsync allocations can spill into shared system memory under WDDM: neither the CUDA guide page nor the
-  NVIDIA article says so explicitly (only inferred from the observed spill). Whether the fallback policy applies to
-  `cudaMallocAsync` pools is not confirmed.
+- Whether `cudaMemPoolSetAttribute` via ctypes on the default pool is accepted at runtime (not needed: `empty_cache()` is enough).
+- Whether the "Sysmem Fallback Policy" setting governs `cudaMallocAsync` pools (the spill itself is observed live, below).
 - Fragmentation of `cudaMallocAsync` with many differently sized allocations: the CUDA guide only says pools "help reduce overhead and
   prevent fragmentation"; no official guidance for tiled-conv workloads was found.
 - Whether any `modules/` code (not `script_callbacks`) lets an extension ask Forge to release memory before loading the SD

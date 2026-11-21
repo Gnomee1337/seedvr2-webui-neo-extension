@@ -32,8 +32,10 @@ requirements-dev.txt python -m pytest tests -q` (pulls CPU torch on Windows). CI
 
 ## Next steps
 
-1. B13 — VAE decode with `--cuda-malloc` without the shared-memory spill (R6), weight 3; card
-   `roadmap-blocks/B13-vae-decode-cuda-malloc.md`, branch `feature/b13-vae-decode-cuda-malloc`. Step 0: baseline live.
+1. B13 — VAE decode with `--cuda-malloc` without the shared-memory spill, weight 3; card
+   `roadmap-blocks/B13-vae-decode-cuda-malloc.md`, branch `feature/b13-vae-decode-cuda-malloc` (not pushed).
+   Implemented, tests green (3132), measured live (2048² decode 112 → 52 s, no spill; native unchanged).
+   Next: `/block-done` (reviews, CI after a push of the branch with the owner's consent).
    DiT tiling / 6K-8K deferred by the owner to `06-IDEAS.md` (outputs above 2K are rare for them, 4K already works).
 
 Agreed with the owner: REQ-1…REQ-6, simplified Git Flow, ComfyUI files kept as in upstream (Forge Neo only),

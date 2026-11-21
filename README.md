@@ -108,15 +108,18 @@ them on every run anyway.
   while everything still fits; more blocks use less VRAM and run slower. 3B models need no BlockSwap.
 - **VAE Tile Size** (Advanced Settings) is 512 by default. Without `--cuda-malloc` that keeps VAE encoding and
   decoding inside VRAM; with 1024 a 1080px image overflowed into shared memory, and with `--cuda-malloc` a run could
-  hang for many minutes. With `--cuda-malloc` the decode at 512 still spills somewhat (next point).
+  hang for many minutes.
 - **Large outputs take minutes.** The default ×2 of a 1024×1024 SDXL image is 2048×2048, about 3.5× the pixels of the
   1080 px shortest edge earlier versions used; with Hires. fix before it, more. 3B GGUF, VAE tile 512, 8 GB GPU
   without bf16: ×2 of a 512×384 image (1024×768) ~50 s; a 16:9 image to 3840×2160 (Long edge 3840) ~8 minutes without `--cuda-malloc` (DiT step 5.7 min, decoding
-  1.5 min) and ~17.5 minutes with it (DiT step 10.5 min, decoding 6.5 min), VRAM full in both cases; the image is clean.
+  1.5 min); with it, measured before the decoding fix below, ~17.5 minutes (DiT step 10.5 min). VRAM full in both
+  cases; the image is clean.
   For quick results stay at 2048 or below.
-- **`--cuda-malloc`** in Forge's launch options changes the speed: in the same test, VAE decoding took 12 s without
-  it and 25–137 s with it (it reserves more VRAM than the card has), while the 7B DiT step with 8 BlockSwap blocks was
-  faster with it (21 s vs 122 s). With 16 blocks both settings are close. If VAE decoding is slow, try launching without it.
+- **`--cuda-malloc`** in Forge's launch options: its allocator never gives freed VRAM back on its own, so during VAE
+  decoding the extension returns the unused part between decoder stages whenever less than 3 GB of the GPU is free.
+  On an 8 GB GPU decoding a 2048×2048 output takes ~52 s with the flag and ~42 s without it (it took ~112 s with the
+  flag before, spilling into shared memory). The 7B DiT step with 8 BlockSwap blocks is faster with the flag (21 s vs
+  122 s); with 16 blocks both settings are close.
 
 ### API
 
