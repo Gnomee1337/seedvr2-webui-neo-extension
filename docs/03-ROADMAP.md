@@ -22,7 +22,7 @@ PROGRESS = (sum of weights of ✅ blocks) / (sum of weights of ALL blocks) × 10
 
 ## Summary
 
-**Sum of weights: 31. Closed: 28. PROGRESS: 90%.**
+**Sum of weights: 31. Closed: 31. PROGRESS: 100%.**
 
 ## Delivery requirements (REQ-1…REQ-6, details — `docs/01-VISION.md`)
 
@@ -34,7 +34,7 @@ PROGRESS = (sum of weights of ✅ blocks) / (sum of weights of ALL blocks) × 10
 | B07 | Correct results: every image of a batch (not the grid), RGB conversion, infotext, respect save settings, empty-result guard | REQ-2 | 3 | ✅ | — |
 | B09 | Tests with Forge stubs + GitHub Actions (pytest) | REQ-6 | 3 | ✅ | — |
 | B10 | VAE tile 512 as the default (closes the tile-1024 stall on 8 GB with `--cuda-malloc`): renamed slider so existing users get it too (Forge's saved UI values — fact-check first), live re-measure by Claude | REQ-4 | 1 | ✅ | — |
-| B13 | VAE decode with `--cuda-malloc` (R6): find why the tiled decode reserves more than it uses and spills into shared memory on 8 GB, and stop it from our code without changing the user's launch flags; measured live before and after | REQ-4 | 3 | ⬜ | all |
+| B13 | VAE decode with `--cuda-malloc` (R6): find why the tiled decode reserves more than it uses and spills into shared memory on 8 GB, and stop it from our code without changing the user's launch flags; measured live before and after | REQ-4 | 3 | ✅ | — |
 
 ## UX
 
@@ -54,7 +54,7 @@ PROGRESS = (sum of weights of ✅ blocks) / (sum of weights of ALL blocks) × 10
 ## How to check the sum
 Add up the "Weight" column across all tables — it must match "Sum of weights" in "Summary":
 B04 2 + B05 2 + B06 4 + B07 3 + B09 3 + B10 1 + B13 3 + B11 3 + B08 3 + B01 3 + B02 3 + B03 1 = **31**.
-Add up the weights of ✅ rows — that is "Closed": B01 3 + B02 3 + B03 1 + B04 2 + B05 2 + B06 4 + B07 3 + B09 3 + B10 1 + B11 3 + B08 3 = **28**.
+Add up the weights of ✅ rows — that is "Closed": B01 3 + B02 3 + B03 1 + B04 2 + B05 2 + B06 4 + B07 3 + B09 3 + B10 1 + B11 3 + B08 3 + B13 3 = **31**.
 
 ## Why this order
 B05 first: a wrong model folder leaves users with empty dropdowns, the most common first-run failure. B04 removed noise
