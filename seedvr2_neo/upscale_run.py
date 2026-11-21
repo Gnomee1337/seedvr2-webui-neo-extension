@@ -194,7 +194,7 @@ class UpscaleRun:
         self.check_interruption()
         if self._dit_blocks and isinstance(module, self._dit_blocks):
             self._progress.block_started()
-        if id(module) in self._trim_module_ids and torch.cuda.mem_get_info()[0] < 2 * 2**30:
+        if id(module) in self._trim_module_ids and torch.cuda.mem_get_info()[0] < 3 * 2**30:
             torch.cuda.empty_cache()  # PROTOTYPE
             self._trims += 1
 
