@@ -176,6 +176,7 @@ class UpscaleRun:
         self._progress = RunProgress([1], hooks.report_progress)
         self._dit_blocks: Tuple[type, ...] = ()  # set only while the DiT phase runs
         self._trim_module_ids: frozenset = frozenset()  # PROTOTYPE: ids of decoder stages while decoding
+        self._trims = 0
 
     def check_interruption(self) -> None:
         """Stop the run when the user pressed Interrupt. Only Interrupt does: Forge's "Stop generating"
@@ -193,8 +194,9 @@ class UpscaleRun:
         self.check_interruption()
         if self._dit_blocks and isinstance(module, self._dit_blocks):
             self._progress.block_started()
-        if id(module) in self._trim_module_ids:
+        if id(module) in self._trim_module_ids and                 torch.cuda.memory_reserved() - torch.cuda.memory_allocated() > 512 * 2**20:
             torch.cuda.empty_cache()  # PROTOTYPE
+            self._trims += 1
 
     def upscale_images(self, inputs: List[Image.Image], request: UpscaleRequest, force_reload: bool,
                        debug_mode: bool) -> UpscaleOutcome:
@@ -310,6 +312,8 @@ class UpscaleRun:
                                                   cache_model=plan.cache_models)
             finally:
                 self._trim_module_ids = frozenset()
+                print(f"[SeedVR2] PROTOTYPE trims: {self._trims}")
+                self._trims = 0
             self._hooks.release_memory()
 
             if not debug_mode: print("[SeedVR2] Phase 4/4: Post-processing...")
