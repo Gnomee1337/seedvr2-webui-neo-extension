@@ -2,8 +2,7 @@
 
 ## Where we stopped
 
-**B13 closed** on `feature/b13-vae-decode-cuda-malloc` (reviews passed, tests green locally); push for CI and the
-merge into `main` wait for the owner's consent. B12 (DiT tiling, 6K / 8K) was deferred by the owner to `06-IDEAS.md`.
+**B13 closed** and merged into `main` with the owner's consent (CI green). B12 (DiT tiling, 6K / 8K) was deferred by the owner to `06-IDEAS.md`.
 
 What B13 changes for users: with Forge's `--cuda-malloc` (PyTorch `cudaMallocAsync`) the VAE decode returns the
 allocator's unused pool before each decoder stage while free VRAM is low (3 GiB at 512 px tiles, scaled by the tile
@@ -30,8 +29,7 @@ requirements-dev.txt python -m pytest tests -q` (pulls CPU torch on Windows). CI
 
 ## Next steps
 
-1. Owner's consent: push `feature/b13-vae-decode-cuda-malloc`, wait for CI, then merge into `main` (`--no-ff`).
-2. Optional: `/finish` — final acceptance of the whole project on the strongest model.
+1. Optional: `/finish` — final acceptance of the whole project on the strongest model.
 
 Agreed with the owner: REQ-1…REQ-6, simplified Git Flow, ComfyUI files kept as in upstream (Forge Neo only),
 hardware target — 8 GB GPU without bf16, the whole repository under Apache-2.0, no grid of upscaled images, the UI
