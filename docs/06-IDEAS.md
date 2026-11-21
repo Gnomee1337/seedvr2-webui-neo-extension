@@ -5,6 +5,13 @@ by the owner. An idea that is taken becomes a block in `docs/03-ROADMAP.md` and 
 
 ---
 
+## DiT tiling for faster 4K+ and 6K / 8K outputs
+Split the image into overlapping tiles with a feather blend so large outputs need less VRAM; then raise the long-edge cap
+above 3840 px. Deferred by the owner: 4K already works (8–17 min on 8 GB), outputs above 2K are rare. The DiT attention
+is already windowed, so first measure what fills VRAM at 3K–4K; pixel-space tiles around the whole pipeline are the
+proven route, latent tiles of the DiT step have no reference implementation. Facts: `external-apis/seedvr2-upstream.md`,
+"Tiling large images". Weight 5. Do when users ask for outputs above 4K.
+
 ## SeedVR2 as a Forge upscaler (Extras tab, Hires. fix)
 Now it is only a Script, so it cannot be combined with another Script (XYZ plot, SD upscale) and is absent from Extras.
 Options: a postprocessing script for the Extras tab (weight 2, recommended — reuses the same pipeline call;

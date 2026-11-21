@@ -133,7 +133,11 @@ The source of truth is the code.
    run `job_no` moves past the file's `n_iter` jobs, since `process_images` that would do it is not called), then
    `shared.state.sampling_step` (of 1000) follows the share done — passes by their images, phases by weight, batches,
    and each DiT block — and `shared.state.textinfo` names the phase (and the pass when there are several). After each of the first three phases dropped objects are collected and the
-   allocator's cached VRAM is returned (`gc.collect()` + `devices.torch_gc()`). A model that is not cached is dropped
+   allocator's cached VRAM is returned (`gc.collect()` + `devices.torch_gc()`). With PyTorch's `cudaMallocAsync`
+   allocator (Forge's `--cuda-malloc`), whose pool keeps every freed block, the decode also returns the unused pool
+   (`torch.cuda.empty_cache()`) before the decoder, its mid block, each up block and their resnets / upsamplers
+   whenever less of the GPU is free than 3 GiB × (tile area / 512²), at least 3 GiB (untiled: the whole output is
+   the tile); the native allocator is left alone. A model that is not cached is dropped
    straight from the GPU, without a copy to RAM (local patch, `external-apis/seedvr2-upstream.md`); with "Unload" the
    next pass loads it again.
 10. Output tensor → PIL images one frame at a time (`tensor_to_images`) (N per pass, checked).

@@ -131,7 +131,80 @@ source from GitHub at install time without a hash check, and installs unused `pe
   copyright notices that were relocated (not removed) from source files, and carry over relevant parts of NOTICE files of bundled
   Apache-2.0 dependencies. These pages are ASF project guidance; for a non-ASF project they are recommendations, not §4 requirements.
 
+## Tiling large images
+
+**Upstream has no tiling of the DiT step.**
+- `main` of numz/ComfyUI-SeedVR2_VideoUpscaler still ends at `4490bd1`; the newest release is `v2.5.23`, and no release note mentions
+  tiling (GitHub API: [commits](https://api.github.com/repos/numz/ComfyUI-SeedVR2_VideoUpscaler/commits?per_page=15),
+  [releases](https://api.github.com/repos/numz/ComfyUI-SeedVR2_VideoUpscaler/releases?per_page=8)). Large-output items only:
+  v2.5.18 (CLI `--chunk_size` streaming for long videos, shared memory instead of numpy pickling for a large-output MemoryError)
+  and v2.5.23 (VAE slicing division-by-zero guard).
+- Open, unmerged [PR #551](https://github.com/numz/ComfyUI-SeedVR2_VideoUpscaler/pull/551) (author xmarre, 39 commits, no maintainer
+  review visible) adds optional DiT tiling: `dit_tiled` (off by default), `dit_tile_size` 128 and `dit_tile_overlap` 16 "in latent-space
+  pixels", edge-aware blending, single-sample only; the author says it is slower, lower-peak-memory and not guaranteed to match
+  full-frame quality (smaller tiles reduce global consistency). Its code was not read.
+
+**Size constraints (vendored code).**
+- Input is resized (`NaResize`, mode `side`, no downsampling only) and then padded with zeros to a multiple of 16 on height and width
+  (`DivisiblePad((16, 16))`), `seedvr2_vendor/core/generation_utils.py` `prepare_video_transforms`;
+  `seedvr2_vendor/data/image/transforms/divisible_crop.py` pads right/bottom with `value=0.0`. Phase 3 trims back to the true size
+  (`true_target_dims`, rounded down to even), `core/generation_phases.py` ("Trimming spatial padding").
+- 16 = VAE spatial factor 8 (`spatial_downsample_factor`, default 8, `core/infer.py`, `core/model_configuration.py`) x DiT patch
+  size `[1, 2, 2]` (`configs_3b/main.yaml`, `configs_7b/main.yaml`): one DiT token covers 16x16 output pixels. Temporal factor 4
+  (frames padded to 4n+1; a single image is one frame).
+
+**DiT attention is windowed, and its window size does not grow with the image.**
+- Both configs: `window: 32/36 x (4,3,3)`, `window_method` alternating `720pwin_by_size_bysize` / `720pswin_by_size_bysize`
+  (regular and half-shifted windows); `rope_type: mmrope3d` (3B), `qk_rope: True` (7B). Code: `models/dit_*/window.py`,
+  `models/dit_*/nablocks/attention/mmattn.py`.
+- `make_720Pwindows_bysize`: with tokens `h x w`, `scale = sqrt(45*80 / (h*w))`, window = `ceil(round(h*scale) / 3)` by
+  `ceil(round(w*scale) / 3)` tokens. So the window area is about 3600/9 = 400 tokens (about 320x320 output pixels; 45x80 tokens =
+  720x1280 px at 16 px per token) for any image size, and its aspect ratio follows the image's. The number of windows grows with the
+  image (about 3x3 at 720p, 4x4 with the shift, more beyond). Consequence (derived from the code, not measured): attention cost and
+  memory grow linearly with the number of tokens, not quadratically.
+- RoPE is computed per window: `mmrope3d` is called with `window_shape` (`mmattn.py`), and `NaMMRotaryEmbedding3d.get_freqs` slices
+  `vid_freqs[l:l+f, :h, :w]`, i.e. positions start at 0 in each window; there is no absolute image position. Text conditioning is the
+  fixed `pos_emb.pt`. Axial frequency tables are capped at 128 tokens per axis (`min(max_height + 4, 128)`, `models/dit_*/rope.py`);
+  a window larger than that is not reachable at about 400 tokens per window except at extreme aspect ratios.
+- A tile processed alone therefore behaves like the same region of the whole image except: (a) the window grid starts at the tile's
+  origin (the half-window shift only exists when the axis has more than one window), (b) the window shape depends on the tile's
+  aspect ratio (a square tile gets about 20x20-token windows, a 4:3 image about 17x23), (c) the VAE's tiled encode/decode and any
+  per-image color correction see only the tile. No global attention exists, so tiles lose no long-range context the whole-image
+  model had beyond one window (and the shifted window); this follows from the code, not from a measurement.
+
+**Related implementations (all pixel-space, each tile through the whole pipeline).**
+- [wdhameli0/sd-webui-forge-neo-seedvr2](https://github.com/wdhameli0/sd-webui-forge-neo-seedvr2) (repo Apache-2.0; `seedvr2_forge/tiling.py`
+  has no license header): README flow "Lanczos pre-resize, then automatic tile split, then SeedVR2 restoration, then feather tile
+  blending", i.e. tiles are cut from the already-enlarged output-size image in pixel space (PIL/NumPy, no latents). Defaults
+  `tile_size = 1024`, `tile_padding = 64` (blend size; README suggests 768 / 512 on OOM; zero padding warns of seams). Layout per axis:
+  one tile if the axis fits, else `n = ceil(size / tile)` tiles with the surplus overlap spread evenly
+  (`overlap = (n*tile - size) // (n-1)`), last tile shifted back to stay full size. Blend: only `blend_padding` pixels at the centre
+  of each overlap are feathered with a linear ramp (`np.linspace(1, 0, blend)`, `a*alpha + b*(1-alpha)`), the rest of the overlap is
+  hard-cut at the middle; rows merged horizontally first, then vertically. No colour handling in `tiling.py`; in `engine.py` every
+  tile gets the ordinary `color_correction` of its own postprocess phase (against that tile's input), tiles of one batch must have
+  the same size, `resolution = min(tile.size)`. Sources: `seedvr2_forge/tiling.py`, `seedvr2_forge/engine.py` (read via GitHub).
+- [moonwhaler/comfyui-seedvr2-tilingupscaler](https://github.com/moonwhaler/comfyui-seedvr2-tilingupscaler) (MIT-0): input split into
+  overlapping tiles, each upscaled by SeedVR2 to a fixed resolution then resized to the target; defaults tile 512, padding 32,
+  `mask_blur` 0, blending `auto`; methods multiband (Laplacian pyramid), bilateral, content_aware, linear, simple; a "Chess" tiling
+  strategy. README advice against seams: multiband or bilateral, padding 64 or more, Chess. A tile batch is treated by SeedVR2 as
+  video frames, so batching unrelated tiles costs some quality. The README says nothing on colour mismatch between tiles.
+- [BacoHubo/ComfyUI_SeedVR2_Tiler](https://github.com/BacoHubo/ComfyUI_SeedVR2_Tiler) (splitter + stitcher nodes): `overlap_percent`
+  default 10 (range 0-40), `feather_blend` default 1.0 (1 = linear feather, 0 = hard cut); seams: raise overlap to 15-20 %. Values
+  from third-party pages ([RunComfy](https://www.runcomfy.com/comfyui-nodes/ComfyUI_SeedVR2_Tiler),
+  [comfy.icu](https://comfy.icu/extension/BacoHubo__ComfyUI_SeedVR2_Tiler)), not from its README.
+- A user report on [lvladikov/SeedVR2-1.4B discussion 1](https://huggingface.co/lvladikov/SeedVR2-1.4B/discussions/1): seams at 1K-4K
+  outputs, attributed by a commenter to the VAE tiled decode (512 / overlap 128). An opinion, not verified behaviour.
+
 ## Not verified
 - Whether upstream numz has a `NOTICE` file in a place other than the root (the root listing showed none; the GitHub page was
   summarized, a `git ls-tree` check was not done).
-- Whether a newer upstream release exists after `4490bd1` (2025-12-24 was the latest commit at the time of checking).
+- Contents of PR #551 (algorithm, whether "latent-space pixels" means latent cells or 8x pixels); it is unmerged, do not rely on it.
+- Peak VRAM of the DiT step versus the image size on an 8 GB GPU (what dominates: per-block activations, window re-ordering copies,
+  or the VAE); needs a live measurement at 2K / 3K / 4K with `torch.cuda.max_memory_allocated` after each phase.
+- Whether a tile cut in latent space (not pixels) gives the same result as the whole latent: the window-grid dependence above says
+  "not identical", the size of the visible effect is unmeasured. Live check: run one 2K image whole, then as DiT-only latent tiles
+  with overlap of one window (about 20-27 tokens) and compare the overlap seams and mean colour per tile.
+- Colour correction per tile versus whole-image (the `lab` / `wavelet` methods compare against the tile's own input); seam visibility
+  on flat regions (sky) is unmeasured.
+- wdhameli0 `tiling.py` call site (the caller of `split_image` / `merge_tiles`) was not read; the pipeline-per-tile fact rests on
+  `engine.py` `process_tiles` and the README flow.

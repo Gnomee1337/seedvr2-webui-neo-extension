@@ -41,6 +41,8 @@ Terms in plain words. A new term comes up in conversation — add it here right 
   into system RAM ("shared GPU memory"); no error, but many times slower.
 - **`--cuda-malloc` (cudaMallocAsync)** — a Forge launch flag that switches PyTorch to another VRAM allocator; changes
   how much memory stays reserved, and so the speed on small GPUs.
+- **Allocator pool** — VRAM PyTorch keeps reserved after tensors are freed, to reuse it without asking the driver.
+  `cudaMallocAsync` never shrinks it on its own; returning it ("trimming") gives the free part back to the GPU.
 - **Keep in RAM / Unload** — what happens to the SeedVR2 models after a run: kept in system RAM for a faster next run,
   or freed completely (default).
 - **Offload** — moving a model or tensors to the CPU when not in use.

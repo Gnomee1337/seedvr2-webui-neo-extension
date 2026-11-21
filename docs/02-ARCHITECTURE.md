@@ -120,7 +120,10 @@ No Forge or Gradio imports; torch only in `upscale_run.py`. Tested outside Forge
   `UpscaleOutcome` (upscaled images by input index, failure text): an `OutputTarget` per input size, passes, the four
   phases with fresh context, memory release after each phase, errors reduced to their type. Interrupt and progress:
   the pipeline's progress callback and `ctx['interrupt_fn']` between batches, and forward pre-hooks on the container
-  modules of the VAE and the DiT (`watching_modules`, `container_modules`, `dit_block_types`) inside a batch;
+  modules of the VAE and the DiT (`watching_modules`, `container_modules`, `dit_block_types`) inside a batch.
+  Under the `cudaMallocAsync` allocator (`keeps_freed_vram`) the same hooks return the unused VRAM pool before each
+  decoder stage (`decoder_stages`, hooked containers only) while the GPU's free memory (`free_vram_bytes`) is under
+  `trim_threshold_bytes` (3 GiB at 512 px tiles, scaled by the tile area);
   `images_to_tensor` / `tensor_to_images`.
 
 ### seedvr2_vendor/core/

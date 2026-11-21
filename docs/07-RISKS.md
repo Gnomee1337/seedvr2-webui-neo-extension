@@ -62,16 +62,17 @@ Live-checked on an 8 GB GPU without bf16, 16 GB RAM, 1080px output, VAE tile 512
 3B fp8 — 5–7 s; 7B fp8 with BlockSwap 16 — 34–42 s (780 s without BlockSwap). All gave clean images; after a run with
 "Unload" the GPU drops back to about 0.6 GB used. Between phases the reserved VRAM goes back to ~0.5 GB.
 
-- 🟡 R6 (S2×L3) **With `--cuda-malloc` (cudaMallocAsync) VAE decoding spills into shared memory.** At 1080px with tile
-  512 the decode reserves 8.7 GB for a 5.2 GB peak, pages 0.7–2.9 GB and takes 25–137 s; without the flag 6.7 GB
-  reserved, no spill, 12.4 s. At 1024px shortest edge (img2img 512×384 → 1364×1024, 3B GGUF Q6_K, tile 512/128): decode
-  68–77 s with the flag, 15.7 s without; encode 12–14 s either way; the whole run 128 s vs 68 s, peak 7.8–7.9 GB used.
-  On the current Forge (PyTorch 2.13) ×2 of 512×384 → 1024×768 with the flag decoded for 2.5–3 min of a 190–220 s
-  run, the same with and without the progress / Interrupt hooks (`main` 220.8 s).
-  With the old default tile 1024 the same case could run 6–22+ minutes without finishing — the reason 512 is the
-  default. The flag is opt-in in Forge but common on 8 GB setups; it makes the 7B DiT step faster
-  with few BlockSwap blocks (8 blocks: 21 s vs 122 s). README gives the trade-off. Close: release the cache inside the
-  VAE decode between tiles, or measure `expandable_segments`.
+- 🟢 R2 (S2×L1) **The `--cuda-malloc` decode fix is tuned on one 8 GB GPU.** `cudaMallocAsync` keeps every freed
+  block, so the tiled decode reserved 8.7 GB for a 5.2 GB peak and Windows paged 1.6–1.8 GB into shared memory. The
+  decode now returns the unused pool before each decoder stage while under 3 GiB is free at 512 px tiles
+  (`05-DECISIONS.md`). Live, 3B GGUF Q6_K, tile 512/128, img2img ×2, decode with the flag before → after (without the flag): 1024×768 17.5–27.8 s →
+  9.0–9.1 s (7.9–8.0 s); 1364×1024 28.8 s → 18.3 s (15.6 s); 2048×2048 112 s → 52 s (42 s); no shared-memory growth.
+  Not measured: 7B, batches, GPUs other than 8 GB, the encode phase at large sizes (it reserved 4.6 GB for a 2.9 GB
+  peak at 1024×768, no spill), and tiles other than 512 — the 12 / 24 GB profiles use 768 / 1024; the threshold scales
+  with the tile area (an extrapolation). On Linux there is no shared-memory fallback, so the trims there may cost time
+  for nothing (not measured). The decoder and each up block are trimmed right before the next stage too (one extra
+  check each, kept as measured). With the old default tile 1024 the decode could run 6–22+ minutes —
+  the reason 512 is the default. The flag makes the 7B DiT step faster with few BlockSwap blocks (8 blocks: 21 s vs 122 s).
 - 🟡 R4 (S2×L2) **7B with too few BlockSwap blocks falls off a cliff.** 7B fp8 on 8 GB: 8 blocks fit only with
   `--cuda-malloc` (0 GB free), 4 blocks spill (297 s). Larger outputs need more blocks. The note recommends 16.
 - 🟡 R4 (S2×L2) **"Keep in RAM" holds the models in system RAM until the next run** (3–4 GB for 3B fp8, ~16 GB for
@@ -108,16 +109,13 @@ Live-checked on an 8 GB GPU without bf16, 16 GB RAM, 1080px output, VAE tile 512
   for "After run" and BlockSwap: unload, BlockSwap off.
 
 ## 4. Generation flow and results
-- 🟡 R6 (S2×L3) **With `--cuda-malloc` a batch multiplies the VAE-decode spill** (section 3): live, 3B GGUF, 4 × 512→1024 px,
-  tile 512 on an 8 GB GPU — each frame decoded in 90–160 s with VRAM full (vs ~10 s without the flag); the run took
-  ~12 min. Not caused by batching, but users with batches feel it most.
 - 🟡 R6 (S2×L3) **The default ×2 makes UI runs much bigger than before.** The UI starts in Scale factor ×2 (owner's
   choice): SDXL 1024² → 2048² (4.2 MP, ~3.5× the old 1080 px default); with Hires. fix ×1.5 first → 3072² (9.4 MP,
   more than the 4K case above). The size line under the controls shows it before Generate; README says so. A user who
   prefers the shortest edge picks it again each session (the mode is not saved).
 - 🟡 R4 (S2×L2) **A 4K output takes many minutes on an 8 GB GPU.** Live, 3B GGUF, tile 512: one 16:9 image to
-  3840×2160 — ~8 min without `--cuda-malloc`, ~17.5 min with it (DiT step 5.7 / 10.5 min, VRAM full, no OOM, clean
-  image). Faster only with DiT tiling (roadmap).
+  3840×2160 — ~8 min without `--cuda-malloc`, ~17.5 min with it before the decode fix (DiT step 5.7 / 10.5 min, VRAM full, no OOM, clean
+  image). Faster only with DiT tiling (deferred, `06-IDEAS.md`).
 - 🟡 R4 (S2×L2) **A pass may still need a few GB of RAM.** Passes are capped at 16 MP of output (`PASS_BUDGET_PIXELS`
   in `seedvr2_neo/run_inputs.py`), but the pipeline keeps its own copies (latents, decoded frames, alpha) per pass;
   peak RAM per pass is not measured. Huge inputs (a decompression bomb through the API) are decoded by Forge before
@@ -225,9 +223,7 @@ Live-checked on an 8 GB GPU without bf16, 16 GB RAM, 1080px output, VAE tile 512
   that uses the same names; no check exists. Unlikely with these names.
 
 ## Top risks
-1. 🟡 R6 VAE decode spills with `--cuda-malloc` — section 3.
-2. 🟡 R6 A batch multiplies the `--cuda-malloc` decode spill — section 4.
-3. 🟡 R6 The default ×2 makes UI runs much bigger than before — section 4.
-4. 🟡 R4 Corrupt GGUF header can hang the WebUI — section 1.
-5. 🟡 R4 7B with too few BlockSwap blocks — section 3.
-6. 🟡 R4 A pass may still need a few GB of RAM (not measured) — section 4.
+1. 🟡 R6 The default ×2 makes UI runs much bigger than before — section 4.
+2. 🟡 R4 Corrupt GGUF header can hang the WebUI — section 1.
+3. 🟡 R4 7B with too few BlockSwap blocks — section 3.
+4. 🟡 R4 A pass may still need a few GB of RAM (not measured) — section 4.

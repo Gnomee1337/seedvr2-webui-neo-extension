@@ -13,8 +13,10 @@ from seedvr2_neo.loaded_models import LoadedModelTracker
 from seedvr2_neo.memory_plan import build_memory_plan
 from seedvr2_neo.model_lifecycle import ModelLifecycle
 from seedvr2_neo.pipeline_options import AttentionMode, ColorCorrection, PipelineOptions
-from seedvr2_neo.upscale_run import INTERRUPTED_MESSAGE, HostHooks, UpscaleInterrupted, UpscaleRequest, UpscaleRun, \
-    attention_availability, container_modules, dit_block_types, images_to_tensor, tensor_to_images
+from seedvr2_neo import upscale_run
+from seedvr2_neo.upscale_run import INTERRUPTED_MESSAGE, TRIM_BELOW_FREE_BYTES, HostHooks, UpscaleInterrupted, \
+    UpscaleRequest, UpscaleRun, attention_availability, container_modules, decoder_stages, dit_block_types, \
+    images_to_tensor, keeps_freed_vram, tensor_to_images, trim_threshold_bytes
 from seedvr2_neo.upscale_settings import parse_upscale_settings
 
 
@@ -380,3 +382,206 @@ def test_attention_availability_reads_the_vendored_flags():
     assert available == {AttentionMode.SDPA: True, AttentionMode.FLASH_ATTN_2: False,
                          AttentionMode.FLASH_ATTN_3: False, AttentionMode.SAGEATTN_2: True,
                          AttentionMode.SAGEATTN_3: False}
+
+
+# --- returning the unused VRAM pool during the decode (`--cuda-malloc`) ---
+
+class Resnet(torch.nn.Module):
+    """A decoder stage that holds a layer, like the vendored resnets and upsamplers (so it is a watched container)."""
+
+    def __init__(self):
+        super().__init__()
+        self.conv = torch.nn.Identity()
+
+    def forward(self, x):
+        return self.conv(x)
+
+
+class UpBlock(torch.nn.Module):
+    """Shaped like the vendored `UpDecoderBlock3D`: resnets, leaf temporal modules, optional upsamplers."""
+
+    def __init__(self, upsample=True):
+        super().__init__()
+        self.resnets = torch.nn.ModuleList([Resnet(), Resnet()])
+        self.temporal_modules = torch.nn.ModuleList([torch.nn.Identity()])  # a leaf, like the vendored ones: not hooked
+        self.upsamplers = torch.nn.ModuleList([Resnet()]) if upsample else None
+
+    def forward(self, x):
+        for module in list(self.resnets) + list(self.upsamplers or []):
+            x = module(x)
+        return x
+
+
+class Decoder(torch.nn.Module):
+    """Shaped like the vendored `Decoder3D`: a layer in, a mid block, up blocks, a layer out."""
+
+    def __init__(self):
+        super().__init__()
+        self.conv_in = torch.nn.Identity()
+        self.mid_block = Resnet()
+        self.up_blocks = torch.nn.ModuleList([UpBlock(), UpBlock(upsample=False)])
+        self.conv_out = torch.nn.Identity()
+
+    def forward(self, x):
+        x = self.mid_block(self.conv_in(x))
+        for up_block in self.up_blocks:
+            x = up_block(x)
+        return self.conv_out(x)
+
+
+class StagedVae(torch.nn.Module):
+    """A VAE whose decoder runs once per tile, through the stages of `Decoder`."""
+
+    def __init__(self):
+        super().__init__()
+        self.decoder = Decoder()
+
+    def decode(self, tiles):
+        for _ in range(tiles):
+            self.decoder(torch.zeros(1))
+
+
+def test_decoder_stages_are_the_decoder_its_mid_block_up_blocks_and_their_blocks_without_leaves():
+    decoder = StagedVae().decoder
+    first, second = decoder.up_blocks
+    assert decoder_stages(SimpleNamespace(decoder=decoder)) == [
+        decoder, decoder.mid_block, first, first.resnets[0], first.resnets[1], first.upsamplers[0],
+        second, second.resnets[0], second.resnets[1]]
+
+
+def test_every_decoder_stage_is_a_hooked_module():
+    vae = StagedVae()
+    assert {id(stage) for stage in decoder_stages(vae)} <= {id(module) for module in container_modules(vae)}
+
+
+@pytest.mark.parametrize("vae", [None, SimpleNamespace(), SimpleNamespace(decoder="decoder")])
+def test_a_vae_without_a_decoder_module_has_no_stages(vae):
+    assert decoder_stages(vae) == []
+
+
+def test_a_decoder_without_mid_or_up_blocks_is_its_only_stage():
+    vae = Vae()
+    assert decoder_stages(vae) == [vae.decoder]
+
+
+@pytest.mark.parametrize("tile, output, expected_gib", [
+    (512, (1024, 768), 3), (256, (1024, 768), 3), (512, (300, 200), 3), (1024, (2048, 2048), 12),
+    (1024, (1024, 512), 6), (768, (4000, 3000), 6.75), (None, (2048, 2048), 48), (None, (400, 300), 3)])
+def test_the_trim_threshold_grows_with_the_decoded_tile_area(tile, output, expected_gib):
+    assert trim_threshold_bytes(tile, output) == int(expected_gib * 2**30)
+
+
+@pytest.mark.parametrize("backend, device, expected", [
+    ("cudaMallocAsync", "cuda", True), ("cudaMallocAsync", torch.device("cuda", 0), True),
+    ("native", "cuda", False), ("cudaMallocAsync", "cpu", False), ("cudaMallocAsync", "gpu-0", False),
+    ("cudaMallocAsync", None, False)])
+def test_only_the_cuda_malloc_async_allocator_keeps_freed_vram(monkeypatch, backend, device, expected):
+    monkeypatch.setattr(torch.cuda, "get_allocator_backend", lambda: backend)
+    assert keeps_freed_vram(device) is expected
+
+
+@pytest.mark.parametrize("error", [RuntimeError, AttributeError])
+def test_a_torch_that_cannot_name_its_allocator_does_not_keep_freed_vram(monkeypatch, error):
+    def fail():
+        raise error("no CUDA")
+
+    monkeypatch.setattr(torch.cuda, "get_allocator_backend", fail)
+    assert keeps_freed_vram("cuda") is False
+
+
+class StagedPipeline(ModelPipeline):
+    """Decodes `tiles` tiles through a staged decoder (after `fail_after` of them it raises) and records in which phase
+    the pool was returned."""
+
+    def __init__(self, tiles=3, fail_after=None):
+        super().__init__()
+        self.vae = StagedVae()
+        self.runner.vae = self.vae
+        self.tiles = tiles
+        self.fail_after = fail_after
+        self.trims = []
+        self.phase = None
+
+    def encode_all_batches(self, runner, ctx, images, progress_callback, **kwargs):
+        self.phase = "encode"
+        self.vae.decoder.mid_block(torch.zeros(1))  # a decoder stage called outside the decode
+        return super().encode_all_batches(runner, ctx, images, progress_callback, **kwargs)
+
+    def decode_all_batches(self, runner, ctx, progress_callback, **kwargs):
+        self.phase = "decode"
+        for tile in range(self.tiles):
+            if tile == self.fail_after:
+                raise RuntimeError("decode failed")
+            self.vae.decode(1)
+        self.phase = "after"
+        return ctx
+
+
+def run_staged(tmp_path, monkeypatch, pipeline, keeps, free_bytes, tile_size=512, use_tile_vae=True):
+    """Runs one 4×4 image (a 1080 × 1080 output) on the host device "gpu-0"; `pipeline.devices_asked` records which
+    device the allocator and the free-memory checks were asked about."""
+    pipeline.devices_asked = []
+
+    def keeps_freed(device):
+        pipeline.devices_asked.append(device)
+        return keeps
+
+    def free_bytes_of(device):
+        pipeline.devices_asked.append(device)
+        return free_bytes
+
+    monkeypatch.setattr(upscale_run, "keeps_freed_vram", keeps_freed)
+    monkeypatch.setattr(upscale_run, "free_vram_bytes", free_bytes_of)
+    monkeypatch.setattr(torch.cuda, "empty_cache", lambda: pipeline.trims.append(pipeline.phase))
+    run, _ = make_tracked_run(pipeline)
+    request = make_request(tmp_path)
+    request = replace(request, settings=replace(request.settings, tile_size=tile_size, use_tile_vae=use_tile_vae))
+    return run, run.upscale_images(one_image(), request, False, False)
+
+
+def test_a_decode_short_of_free_vram_returns_the_pool_before_each_stage_of_each_tile(tmp_path, monkeypatch):
+    pipeline = StagedPipeline(tiles=3)
+    _, outcome = run_staged(tmp_path, monkeypatch, pipeline, keeps=True, free_bytes=TRIM_BELOW_FREE_BYTES - 1)
+    assert outcome.failure is None
+    assert pipeline.trims == ["decode"] * 9 * 3  # 9 stages (see the stage list test), 3 tiles
+    assert set(pipeline.devices_asked) == {"gpu-0"}
+
+
+def test_a_larger_tile_returns_the_pool_with_more_vram_still_free(tmp_path, monkeypatch):
+    pipeline = StagedPipeline(tiles=1)
+    run_staged(tmp_path, monkeypatch, pipeline, keeps=True, free_bytes=5 * 2**30, tile_size=1024)
+    assert pipeline.trims == ["decode"] * 9
+
+
+def test_an_untiled_decode_counts_the_whole_output_as_its_tile(tmp_path, monkeypatch):
+    pipeline = StagedPipeline(tiles=1)
+    run_staged(tmp_path, monkeypatch, pipeline, keeps=True, free_bytes=5 * 2**30, tile_size=512, use_tile_vae=False)
+    assert pipeline.trims == ["decode"] * 9  # a 1080 × 1080 output: about 13 GiB of headroom
+
+
+def test_free_vram_is_the_first_value_the_driver_reports_for_the_device(monkeypatch):
+    asked = []
+    monkeypatch.setattr(torch.cuda, "mem_get_info", lambda device: asked.append(device) or (3, 8))
+    assert upscale_run.free_vram_bytes("cuda:0") == 3
+    assert asked == ["cuda:0"]
+
+
+def test_a_decode_with_enough_free_vram_does_not_return_the_pool(tmp_path, monkeypatch):
+    pipeline = StagedPipeline()
+    run_staged(tmp_path, monkeypatch, pipeline, keeps=True, free_bytes=TRIM_BELOW_FREE_BYTES)
+    assert pipeline.trims == []
+
+
+def test_the_native_allocator_never_returns_the_pool_during_the_decode(tmp_path, monkeypatch):
+    pipeline = StagedPipeline()
+    run_staged(tmp_path, monkeypatch, pipeline, keeps=False, free_bytes=0)
+    assert pipeline.trims == []
+
+
+def test_a_failed_decode_stops_returning_the_pool(tmp_path, monkeypatch):
+    pipeline = StagedPipeline(tiles=3, fail_after=1)
+    run, outcome = run_staged(tmp_path, monkeypatch, pipeline, keeps=True, free_bytes=0)
+    assert outcome.failure is not None
+    pipeline.phase = "later"
+    run.module_called(pipeline.vae.decoder)
+    assert pipeline.trims == ["decode"] * 9
