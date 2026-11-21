@@ -11,7 +11,7 @@ import traceback
 from contextlib import contextmanager
 from dataclasses import dataclass, field
 from types import SimpleNamespace
-from typing import Callable, Dict, Iterable, Iterator, List, Optional, Tuple
+from typing import Callable, Dict, FrozenSet, Iterable, Iterator, List, Optional, Tuple
 
 import numpy as np
 import torch
@@ -25,6 +25,11 @@ from seedvr2_neo.run_inputs import group_by_shape, split_into_passes
 from seedvr2_neo.run_progress import DECODE_PHASE, ENCODE_PHASE, POSTPROCESS_PHASE, UPSCALE_PHASE, ProgressReport, \
     RunProgress
 from seedvr2_neo.upscale_settings import OutputTarget, UpscaleSettings
+
+# Under this much free VRAM a decode with a pool-keeping allocator returns the unused pool before each decoder stage.
+# Measured on an 8 GB GPU: with 2 GB one stage could still outgrow the free memory and spill into shared memory;
+# with 3 GB none did. A GPU that always has more free never trims, so it never pays the synchronisation.
+TRIM_BELOW_FREE_BYTES = 3 * 2**30
 
 # Why images come back without upscaling when the user pressed Interrupt (infotext and result comment).
 INTERRUPTED_MESSAGE = "Interrupted"
@@ -127,6 +132,43 @@ def container_modules(model) -> List[torch.nn.Module]:
     return [module for module in model.modules() if next(module.children(), None) is not None]
 
 
+def keeps_freed_vram(device: object) -> bool:
+    """True when the allocator on `device` keeps every freed block until asked to give it back: PyTorch's
+    `cudaMallocAsync` backend, which Forge's `--cuda-malloc` selects. Its pool only grows during a tiled decode
+    (8.7 GB reserved for a 5.2 GB peak on an 8 GB GPU), and on Windows the driver moves the excess into shared system
+    memory, which makes the decode several times slower. False for the native allocator, a CPU, or a torch without
+    CUDA. Facts: `docs/external-apis/forge-neo.md` (allocator)."""
+    try:
+        return torch.device(device).type == "cuda" and torch.cuda.get_allocator_backend() == "cudaMallocAsync"
+    except (AttributeError, RuntimeError, TypeError, ValueError):
+        return False
+
+
+def decoder_stages(vae: object) -> List[torch.nn.Module]:
+    """The VAE decoder, its mid block, each up block and the modules inside an up block (resnets, upsamplers): the
+    points of a tiled decode where the unused pool is returned. Once per tile is not enough on an 8 GB GPU, since one
+    tile's stages outgrow the pool; before every layer would synchronise the GPU thousands of times per tile. Empty for a
+    VAE without a decoder module."""
+    decoder = getattr(vae, "decoder", None)
+    if not isinstance(decoder, torch.nn.Module):
+        return []
+    stages = [decoder]
+    mid_block = getattr(decoder, "mid_block", None)
+    if isinstance(mid_block, torch.nn.Module):
+        stages.append(mid_block)
+    up_blocks = getattr(decoder, "up_blocks", None)
+    for up_block in up_blocks if isinstance(up_blocks, torch.nn.ModuleList) else ():
+        stages.append(up_block)
+        for child in up_block.children():
+            stages.extend(child if isinstance(child, torch.nn.ModuleList) else [child])
+    return stages
+
+
+def free_vram_bytes(device: object) -> int:
+    """The free memory of the CUDA `device`, as the driver reports it."""
+    return torch.cuda.mem_get_info(device)[0]
+
+
 def runner_dit(runner: object) -> Optional[object]:
     """The runner's DiT, unwrapped from the vendored fp8 / GGUF wrapper (`dit_model`), or None."""
     model = getattr(runner, "dit", None)
@@ -175,8 +217,7 @@ class UpscaleRun:
         self._hooks = hooks
         self._progress = RunProgress([1], hooks.report_progress)
         self._dit_blocks: Tuple[type, ...] = ()  # set only while the DiT phase runs
-        self._trim_module_ids: frozenset = frozenset()  # PROTOTYPE: ids of decoder stages while decoding
-        self._trims = 0
+        self._trim_before: FrozenSet[int] = frozenset()  # ids of decoder stages; set only while such a decode runs
 
     def check_interruption(self) -> None:
         """Stop the run when the user pressed Interrupt. Only Interrupt does: Forge's "Stop generating"
@@ -194,9 +235,8 @@ class UpscaleRun:
         self.check_interruption()
         if self._dit_blocks and isinstance(module, self._dit_blocks):
             self._progress.block_started()
-        if id(module) in self._trim_module_ids and torch.cuda.mem_get_info()[0] < 3 * 2**30:
-            torch.cuda.empty_cache()  # PROTOTYPE
-            self._trims += 1
+        if id(module) in self._trim_before and free_vram_bytes(self._hooks.device) < TRIM_BELOW_FREE_BYTES:
+            torch.cuda.empty_cache()  # under `cudaMallocAsync`: trims the pool to the live blocks (synchronises)
 
     def upscale_images(self, inputs: List[Image.Image], request: UpscaleRequest, force_reload: bool,
                        debug_mode: bool) -> UpscaleOutcome:
@@ -294,26 +334,13 @@ class UpscaleRun:
 
             if not debug_mode: print(f"[SeedVR2] Phase 3/4: Decoding {tiled_note}...")
             self._progress.start_phase(DECODE_PHASE)
-            decoder = getattr(getattr(runner, "vae", None), "decoder", None)
-            stages = [decoder]
-            if decoder is not None:
-                stages.append(decoder.mid_block)
-                for up_block in decoder.up_blocks:
-                    stages.append(up_block)
-                    stages.extend(up_block.children())
-                    for child in up_block.children():
-                        if isinstance(child, torch.nn.ModuleList):
-                            stages.extend(child)
-            self._trim_module_ids = frozenset(id(m) for m in stages if m is not None)
-            print(f"[SeedVR2] PROTOTYPE trimming before {len(self._trim_module_ids)} decoder stages")
-            decoder = stages = up_block = child = None
+            if keeps_freed_vram(self._hooks.device):
+                self._trim_before = frozenset(id(stage) for stage in decoder_stages(getattr(runner, "vae", None)))
             try:
                 ctx = pipeline.decode_all_batches(runner, ctx=ctx, debug=debug, progress_callback=self.phase_progress,
                                                   cache_model=plan.cache_models)
             finally:
-                self._trim_module_ids = frozenset()
-                print(f"[SeedVR2] PROTOTYPE trims: {self._trims}")
-                self._trims = 0
+                self._trim_before = frozenset()
             self._hooks.release_memory()
 
             if not debug_mode: print("[SeedVR2] Phase 4/4: Post-processing...")
