@@ -70,7 +70,7 @@ Live-checked on an 8 GB GPU without bf16, 16 GB RAM, 1080px output, VAE tile 512
   run, the same with and without the progress / Interrupt hooks (`main` 220.8 s).
   With the old default tile 1024 the same case could run 6–22+ minutes without finishing — the reason 512 is the
   default. The flag is opt-in in Forge but common on 8 GB setups; it makes the 7B DiT step faster
-  with few BlockSwap blocks (8 blocks: 21 s vs 122 s). README gives the trade-off. Close: release the cache inside the
+  with few BlockSwap blocks (8 blocks: 21 s vs 122 s). README gives the trade-off. Close (B13): release the cache inside the
   VAE decode between tiles, or measure `expandable_segments`.
 - 🟡 R4 (S2×L2) **7B with too few BlockSwap blocks falls off a cliff.** 7B fp8 on 8 GB: 8 blocks fit only with
   `--cuda-malloc` (0 GB free), 4 blocks spill (297 s). Larger outputs need more blocks. The note recommends 16.
@@ -117,7 +117,7 @@ Live-checked on an 8 GB GPU without bf16, 16 GB RAM, 1080px output, VAE tile 512
   prefers the shortest edge picks it again each session (the mode is not saved).
 - 🟡 R4 (S2×L2) **A 4K output takes many minutes on an 8 GB GPU.** Live, 3B GGUF, tile 512: one 16:9 image to
   3840×2160 — ~8 min without `--cuda-malloc`, ~17.5 min with it (DiT step 5.7 / 10.5 min, VRAM full, no OOM, clean
-  image). Faster only with DiT tiling (roadmap).
+  image). Faster only with DiT tiling (deferred, `06-IDEAS.md`).
 - 🟡 R4 (S2×L2) **A pass may still need a few GB of RAM.** Passes are capped at 16 MP of output (`PASS_BUDGET_PIXELS`
   in `seedvr2_neo/run_inputs.py`), but the pipeline keeps its own copies (latents, decoded frames, alpha) per pass;
   peak RAM per pass is not measured. Huge inputs (a decompression bomb through the API) are decoded by Forge before

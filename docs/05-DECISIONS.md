@@ -224,8 +224,8 @@ must use the new one. Any later default change meets the same `ui-config.json` t
 
 ### No 6K / 8K output sizes until the DiT works in tiles
 Why: the DiT sees the whole image; 8K is 33 MP, eight times an output that already takes minutes on an 8 GB GPU, and
-the resolution slider would clamp it silently. Offering it would mislead users. Agreed with the owner; DiT tiling is a
-separate block, after which the larger sizes are added. Until then the scale factor and long edge modes cap the output
+the resolution slider would clamp it silently. Offering it would mislead users. Agreed with the owner; DiT tiling is
+deferred to the ideas list (the owner does not need outputs above 2K; 4K already works), and the larger sizes come with it. Until then the scale factor and long edge modes cap the output
 long edge at 3840 px; the shortest-edge slider keeps its old range (up to 3840 on the shortest edge), so as not to
 change existing users' settings.
 

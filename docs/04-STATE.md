@@ -28,11 +28,13 @@ requirements-dev.txt python -m pytest tests -q` (pulls CPU torch on Windows). CI
 
 ## Completion percentage
 
-**84%** (28 of 33). 1 block open.
+**90%** (28 of 31). 1 block open (B13).
 
 ## Next steps
 
-1. B12 — DiT tiling with feather blending (4K+ on 8 GB), then 6K/8K options. Weight 5: plan on a strong model.
+1. B13 — VAE decode with `--cuda-malloc` without the shared-memory spill (R6), weight 3; card
+   `roadmap-blocks/B13-vae-decode-cuda-malloc.md`, branch `feature/b13-vae-decode-cuda-malloc`. Step 0: baseline live.
+   DiT tiling / 6K-8K deferred by the owner to `06-IDEAS.md` (outputs above 2K are rare for them, 4K already works).
 
 Agreed with the owner: REQ-1…REQ-6, simplified Git Flow, ComfyUI files kept as in upstream (Forge Neo only),
 hardware target — 8 GB GPU without bf16, the whole repository under Apache-2.0, no grid of upscaled images, the UI

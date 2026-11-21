@@ -94,6 +94,39 @@ Source: `modules/processing.py`.
   memory. Source: <https://docs.pytorch.org/docs/2.15/notes/cuda.html> (Memory management) and
   `torch.cuda.memory.empty_cache` page. The docs do not say how it behaves under `backend:cudaMallocAsync`; they only say some
   memory stats are "specific to backend:native" and not meaningful with `cudaMallocAsync`.
+- **`cudaMallocAsync` backend in PyTorch (source `c10/cuda/CUDAMallocAsyncAllocator.cpp` at tag v2.8.0,
+  <https://github.com/pytorch/pytorch/blob/v2.8.0/c10/cuda/CUDAMallocAsyncAllocator.cpp>; later tags not read):**
+  - `emptyCache()` takes the allocator mutex and, for each initialized device, calls `cudaDeviceSynchronize()` and then
+    `cudaMemPoolTrimTo(default_pool, 0)`: it does release the freed (unused) pool memory back to the driver, and it blocks until the
+    device is idle. Memory held by live tensors stays.
+  - `lazy_init_device` sets the default pool's `cudaMemPoolAttrReleaseThreshold` to `UINT64_MAX` (freed memory is kept in the pool
+    until a trim) and enables the three `cudaMemPoolReuse*` attributes. The file reads no environment variable and exposes no
+    setter for the threshold; a Python-side change would have to call `cudaMemPoolSetAttribute` itself (ctypes / `cuda-python`),
+    not confirmed to work. NVIDIA: threshold = "the amount of memory in bytes a pool should hold onto before trying to release
+    memory back to the OS"; `UINT64_MAX` "will prevent the driver from attempting to shrink the pool"; `cudaMemPoolTrimTo` shrinks
+    explicitly (synchronize first). Source: CUDA Programming Guide, Stream-Ordered Memory Allocator,
+    <https://docs.nvidia.com/cuda/cuda-programming-guide/04-special-topics/stream-ordered-memory-allocation.html>.
+  - Stats (`getDeviceStats`): reserved comes from `cudaMemPoolAttrReservedMemCurrent/High` ("current total physical GPU memory
+    consumed by the pool" per the CUDA guide), allocated and active both from `cudaMemPoolAttrUsedMemCurrent/High`; only the
+    AGGREGATE stat is filled, native-specific stats stay zero. `resetPeakStats` resets the two High attributes;
+    `resetAccumulatedStats` only warns once.
+  - `set_per_process_memory_fraction` works with this backend: `setMemoryFraction` stores `fraction * total` (from `cudaMemGetInfo`)
+    and `mallocAsync` raises an out-of-memory error before `cudaMallocAsync` when `used + size` would exceed it. It counts allocated
+    bytes (not pool reserved), so it does not cap the pool's reserved size; the source comment rejects the release threshold as a
+    soft limit ("performance nondeterminism").
+  - Backend parsing (`CUDAAllocatorConfig.cpp`, v2.8.0): `backend` accepts `native` or `cudaMallocAsync`; `expandable_segments` is
+    parsed separately and counts as a native-specific option, so with both set PyTorch emits a warning that `backend:cudaMallocAsync`
+    ignores the native options. `CUDAMallocAsyncAllocator.cpp` never mentions `expandable_segments`, so with the async backend
+    active it has no effect (inferred from the two files; the allocator selection code itself was not read).
+- **Windows "CUDA - Sysmem Fallback Policy":** a driver feature since 536.40 (shared system memory is used when VRAM runs out:
+  the app keeps running, slower); since driver 546.01 a per-application NVIDIA Control Panel setting (Manage 3D settings >
+  Program Settings > python.exe > "CUDA - Sysmem Fallback Policy" = "Prefer No Sysmem Fallback") turns it off, at the cost of an
+  out-of-memory error instead of a slowdown. Source: NVIDIA support article
+  <https://nvidia.custhelp.com/app/answers/detail/a_id/5490/~/system-memory-fallback-for-stable-diffusion> (page itself returned
+  403; content as quoted by the search snippet, dated 2023-10-31). A PyTorch maintainer states PyTorch does not trigger it, the
+  Windows driver does, and suggests `set_per_process_memory_fraction` to avoid it:
+  <https://discuss.pytorch.org/t/documented-fix-slow-execution-pytorch-using-gpu-shared-memory/218909> (forum, a hint only).
+  No official API to read or set the policy from an app was found. The Linux driver does not support it (NVIDIA developer forum).
 - **Callbacks:** `modules/script_callbacks.py` has 21 `on_*` registrars (names): `on_app_started`, `on_before_reload`,
   `on_model_loaded`, `on_ui_tabs`, `on_ui_train_tabs`, `on_ui_settings`, `on_before_image_saved`, `on_image_saved`,
   `on_extra_noise`, `on_cfg_denoiser`, `on_cfg_denoised`, `on_cfg_after_cfg`, `on_before_component`, `on_after_component`,
@@ -512,9 +545,15 @@ install's venv.
 - The launch flag name: `backend/args.py` defines `--gpu-device-id`, while a read of `modules/cmd_args.py` showed `--device-id`
   (str); which one Neo's launcher actually accepts, and whether both exist, was not settled.
 - Where `unload_all_models()` puts the weights (CPU RAM or dropped): `backend/patcher/base` (`detach`, `partially_unload`) not read.
-- Behaviour of `torch.cuda.empty_cache()` and `memory_reserved()` under `cudaMallocAsync`: PyTorch docs are silent; check with
-  a live run (`PYTORCH_CUDA_ALLOC_CONF=backend:cudaMallocAsync` via `--cuda-malloc`: allocate, free, `empty_cache()`, compare
-  `nvidia-smi` with `torch.cuda.memory_reserved()`).
+- `cudaMallocAsync` live checks (the source reading is above; the PyTorch version Forge Neo ships was not matched to v2.8.0):
+  with `--cuda-malloc` allocate, free, `empty_cache()`, and compare `nvidia-smi`, `memory_reserved()` and `mem_get_info()`
+  (what `mem_get_info` reports for sysmem-spilled pool memory is not documented); whether `empty_cache()` between tiles removes the
+  spill and what it costs in time; whether `cudaMemPoolSetAttribute` via ctypes on the default pool is accepted at runtime.
+- Whether cudaMallocAsync allocations can spill into shared system memory under WDDM: neither the CUDA guide page nor the
+  NVIDIA article says so explicitly (only inferred from the observed spill). Whether the fallback policy applies to
+  `cudaMallocAsync` pools is not confirmed.
+- Fragmentation of `cudaMallocAsync` with many differently sized allocations: the CUDA guide only says pools "help reduce overhead and
+  prevent fragmentation"; no official guidance for tiled-conv workloads was found.
 - Whether any `modules/` code (not `script_callbacks`) lets an extension ask Forge to release memory before loading the SD
   model: none found in `memory_management.py`; a full search of the tree was not done.
 - `ScriptRunner.run` was only summarised (no state or `do_not_save_samples` handling in it); it was not read line by line.
