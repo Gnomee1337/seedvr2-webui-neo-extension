@@ -16,7 +16,7 @@ from seedvr2_neo.pipeline_options import AttentionMode, ColorCorrection, Pipelin
 from seedvr2_neo import upscale_run
 from seedvr2_neo.upscale_run import INTERRUPTED_MESSAGE, TRIM_BELOW_FREE_BYTES, HostHooks, UpscaleInterrupted, \
     UpscaleRequest, UpscaleRun, attention_availability, container_modules, decoder_stages, dit_block_types, \
-    images_to_tensor, keeps_freed_vram, tensor_to_images
+    images_to_tensor, keeps_freed_vram, tensor_to_images, trim_threshold_bytes
 from seedvr2_neo.upscale_settings import parse_upscale_settings
 
 
@@ -401,6 +401,7 @@ class UpBlock(torch.nn.Module):
     def __init__(self, upsample=True):
         super().__init__()
         self.resnets = torch.nn.ModuleList([Resnet(), Resnet()])
+        self.temporal_modules = torch.nn.ModuleList([torch.nn.Identity()])  # a leaf, like the vendored ones: not hooked
         self.upsamplers = torch.nn.ModuleList([Resnet()]) if upsample else None
 
     def forward(self, x):
@@ -436,17 +437,34 @@ class StagedVae(torch.nn.Module):
             self.decoder(torch.zeros(1))
 
 
-def test_decoder_stages_are_the_decoder_its_mid_block_up_blocks_and_their_modules():
+def test_decoder_stages_are_the_decoder_its_mid_block_up_blocks_and_their_blocks_without_leaves():
     decoder = StagedVae().decoder
     first, second = decoder.up_blocks
     assert decoder_stages(SimpleNamespace(decoder=decoder)) == [
-        decoder, decoder.mid_block, first, *first.resnets, *first.upsamplers, second, *second.resnets]
+        decoder, decoder.mid_block, first, first.resnets[0], first.resnets[1], first.upsamplers[0],
+        second, second.resnets[0], second.resnets[1]]
 
 
-@pytest.mark.parametrize("vae", [None, SimpleNamespace(), SimpleNamespace(decoder="decoder"), Vae()])
-def test_a_vae_without_a_staged_decoder_gives_only_what_it_has(vae):
-    decoder = getattr(vae, "decoder", None)
-    assert decoder_stages(vae) == ([decoder] if isinstance(decoder, torch.nn.Module) else [])
+def test_every_decoder_stage_is_a_hooked_module():
+    vae = StagedVae()
+    assert {id(stage) for stage in decoder_stages(vae)} <= {id(module) for module in container_modules(vae)}
+
+
+@pytest.mark.parametrize("vae", [None, SimpleNamespace(), SimpleNamespace(decoder="decoder")])
+def test_a_vae_without_a_decoder_module_has_no_stages(vae):
+    assert decoder_stages(vae) == []
+
+
+def test_a_decoder_without_mid_or_up_blocks_is_its_only_stage():
+    vae = Vae()
+    assert decoder_stages(vae) == [vae.decoder]
+
+
+@pytest.mark.parametrize("tile, output, expected_gib", [
+    (512, (1024, 768), 3), (256, (1024, 768), 3), (512, (300, 200), 3), (1024, (2048, 2048), 12),
+    (1024, (1024, 512), 6), (768, (4000, 3000), 6.75), (None, (2048, 2048), 48), (None, (400, 300), 3)])
+def test_the_trim_threshold_grows_with_the_decoded_tile_area(tile, output, expected_gib):
+    assert trim_threshold_bytes(tile, output) == int(expected_gib * 2**30)
 
 
 @pytest.mark.parametrize("backend, device, expected", [
@@ -495,19 +513,40 @@ class StagedPipeline(ModelPipeline):
         return ctx
 
 
-def run_staged(tmp_path, monkeypatch, pipeline, keeps, free_bytes):
-    monkeypatch.setattr(upscale_run, "keeps_freed_vram", lambda device: keeps)
-    monkeypatch.setattr(upscale_run, "free_vram_bytes", lambda device: free_bytes)
+def run_staged(tmp_path, monkeypatch, pipeline, keeps, free_bytes, tile_size=512):
+    """Runs one 4×4 image (a 1080 × 1080 output) on the host device "gpu-0"; `pipeline.devices_asked` records which
+    device the allocator and the free-memory checks were asked about."""
+    pipeline.devices_asked = []
+
+    def keeps_freed(device):
+        pipeline.devices_asked.append(device)
+        return keeps
+
+    def free_bytes_of(device):
+        pipeline.devices_asked.append(device)
+        return free_bytes
+
+    monkeypatch.setattr(upscale_run, "keeps_freed_vram", keeps_freed)
+    monkeypatch.setattr(upscale_run, "free_vram_bytes", free_bytes_of)
     monkeypatch.setattr(torch.cuda, "empty_cache", lambda: pipeline.trims.append(pipeline.phase))
     run, _ = make_tracked_run(pipeline)
-    return run, run.upscale_images(one_image(), make_request(tmp_path), False, False)
+    request = make_request(tmp_path)
+    request = replace(request, settings=replace(request.settings, tile_size=tile_size))
+    return run, run.upscale_images(one_image(), request, False, False)
 
 
 def test_a_decode_short_of_free_vram_returns_the_pool_before_each_stage_of_each_tile(tmp_path, monkeypatch):
     pipeline = StagedPipeline(tiles=3)
     _, outcome = run_staged(tmp_path, monkeypatch, pipeline, keeps=True, free_bytes=TRIM_BELOW_FREE_BYTES - 1)
     assert outcome.failure is None
-    assert pipeline.trims == ["decode"] * len(decoder_stages(pipeline.vae)) * 3
+    assert pipeline.trims == ["decode"] * 9 * 3  # 9 stages (see the stage list test), 3 tiles
+    assert set(pipeline.devices_asked) == {"gpu-0"}
+
+
+def test_a_larger_tile_returns_the_pool_with_more_vram_still_free(tmp_path, monkeypatch):
+    pipeline = StagedPipeline(tiles=1)
+    run_staged(tmp_path, monkeypatch, pipeline, keeps=True, free_bytes=5 * 2**30, tile_size=1024)
+    assert pipeline.trims == ["decode"] * 9
 
 
 def test_a_decode_with_enough_free_vram_does_not_return_the_pool(tmp_path, monkeypatch):
@@ -528,4 +567,4 @@ def test_a_failed_decode_stops_returning_the_pool(tmp_path, monkeypatch):
     assert outcome.failure is not None
     pipeline.phase = "later"
     run.module_called(pipeline.vae.decoder)
-    assert pipeline.trims == ["decode"] * len(decoder_stages(pipeline.vae))
+    assert pipeline.trims == ["decode"] * 9

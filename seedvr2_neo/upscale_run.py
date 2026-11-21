@@ -26,10 +26,13 @@ from seedvr2_neo.run_progress import DECODE_PHASE, ENCODE_PHASE, POSTPROCESS_PHA
     RunProgress
 from seedvr2_neo.upscale_settings import OutputTarget, UpscaleSettings
 
-# Under this much free VRAM a decode with a pool-keeping allocator returns the unused pool before each decoder stage.
-# Measured on an 8 GB GPU: with 2 GB one stage could still outgrow the free memory and spill into shared memory;
-# with 3 GB none did. A GPU that always has more free never trims, so it never pays the synchronisation.
+# Under this much free VRAM (3 GiB) a decode with a pool-keeping allocator returns the unused pool before each decoder
+# stage. Measured on an 8 GB GPU with 512 px VAE tiles: with 2 GiB the pool could still grow past the free memory within
+# one stage and spill into shared memory; with 3 GiB it never did. A GPU that always has more free never trims, so it
+# never pays the synchronisation. A stage needs memory in proportion to the tile's area, so larger tiles (or no tiling)
+# raise the threshold by that ratio: an extrapolation, measured only at 512.
 TRIM_BELOW_FREE_BYTES = 3 * 2**30
+TRIM_MEASURED_TILE_PIXELS = 512 * 512
 
 # Why images come back without upscaling when the user pressed Interrupt (infotext and result comment).
 INTERRUPTED_MESSAGE = "Interrupted"
@@ -129,14 +132,19 @@ def container_modules(model) -> List[torch.nn.Module]:
     hooks set before a phase stay on the model the phase runs. An empty list for anything that is not a module."""
     if not isinstance(model, torch.nn.Module):
         return []
-    return [module for module in model.modules() if next(module.children(), None) is not None]
+    return [module for module in model.modules() if is_container(module)]
+
+
+def is_container(module: torch.nn.Module) -> bool:
+    """True for a module that holds other modules: only these get the run's forward pre-hooks."""
+    return next(module.children(), None) is not None
 
 
 def keeps_freed_vram(device: object) -> bool:
     """True when the allocator on `device` keeps every freed block until asked to give it back: PyTorch's
-    `cudaMallocAsync` backend, which Forge's `--cuda-malloc` selects. Its pool only grows during a tiled decode
-    (8.7 GB reserved for a 5.2 GB peak on an 8 GB GPU), and on Windows the driver moves the excess into shared system
-    memory, which makes the decode several times slower. False for the native allocator, a CPU, or a torch without
+    `cudaMallocAsync` backend, which Forge's `--cuda-malloc` selects. Its pool only grows during a decode (8.7 GB
+    reserved for a 5.2 GB peak on an 8 GB GPU), and on Windows the driver moves the excess into shared system memory,
+    which makes the decode several times slower. False for the native allocator, a CPU, or a torch without
     CUDA. Facts: `docs/external-apis/forge-neo.md` (allocator)."""
     try:
         return torch.device(device).type == "cuda" and torch.cuda.get_allocator_backend() == "cudaMallocAsync"
@@ -145,10 +153,12 @@ def keeps_freed_vram(device: object) -> bool:
 
 
 def decoder_stages(vae: object) -> List[torch.nn.Module]:
-    """The VAE decoder, its mid block, each up block and the modules inside an up block (resnets, upsamplers): the
-    points of a tiled decode where the unused pool is returned. Once per tile is not enough on an 8 GB GPU, since one
-    tile's stages outgrow the pool; before every layer would synchronise the GPU thousands of times per tile. Empty for a
-    VAE without a decoder module."""
+    """The VAE decoder, its mid block, each up block and the blocks inside an up block (resnets, upsamplers): the
+    points of a decode where the unused pool is returned. Once per tile is not enough on an 8 GB GPU, since the pool
+    grows past the free memory within one tile; before every layer would synchronise the GPU thousands of times per
+    tile. The decoder and each up block are followed at once by another stage, so they add a check each; they are
+    kept as measured. Only containers are listed, since only they are hooked (`container_modules`); empty for a VAE
+    without a decoder module."""
     decoder = getattr(vae, "decoder", None)
     if not isinstance(decoder, torch.nn.Module):
         return []
@@ -161,7 +171,17 @@ def decoder_stages(vae: object) -> List[torch.nn.Module]:
         stages.append(up_block)
         for child in up_block.children():
             stages.extend(child if isinstance(child, torch.nn.ModuleList) else [child])
-    return stages
+    return [stage for stage in stages if is_container(stage)]
+
+
+def trim_threshold_bytes(tile_size: Optional[int], output_size: Tuple[int, int]) -> int:
+    """The free VRAM under which the decode returns the unused pool: `TRIM_BELOW_FREE_BYTES`, scaled up by the area of
+    one decoded tile against the measured 512 × 512. `tile_size` None means an untiled decode (the whole output at once);
+    a tile larger than the output is the output."""
+    width, height = output_size
+    if tile_size is not None:
+        width, height = min(width, tile_size), min(height, tile_size)
+    return int(TRIM_BELOW_FREE_BYTES * max(1.0, width * height / TRIM_MEASURED_TILE_PIXELS))
 
 
 def free_vram_bytes(device: object) -> int:
@@ -217,7 +237,10 @@ class UpscaleRun:
         self._hooks = hooks
         self._progress = RunProgress([1], hooks.report_progress)
         self._dit_blocks: Tuple[type, ...] = ()  # set only while the DiT phase runs
-        self._trim_before: FrozenSet[int] = frozenset()  # ids of decoder stages; set only while such a decode runs
+        # Ids of the decoder stages, set only while a decode under a pool-keeping allocator runs; ids, like the hooks,
+        # so nothing here keeps the VAE alive.
+        self._trim_before: FrozenSet[int] = frozenset()
+        self._trim_threshold = TRIM_BELOW_FREE_BYTES
 
     def check_interruption(self) -> None:
         """Stop the run when the user pressed Interrupt. Only Interrupt does: Forge's "Stop generating"
@@ -231,11 +254,12 @@ class UpscaleRun:
         self._progress.batch_done(current, total)
 
     def module_called(self, module: torch.nn.Module) -> None:
-        """Before a watched module's forward during the phases: Interrupt, and a DiT block moves the bar."""
+        """Before a watched module's forward during the phases: Interrupt, a DiT block moves the bar, and a decoder
+        stage returns the unused VRAM pool when the decode needs it (this synchronises the GPU)."""
         self.check_interruption()
         if self._dit_blocks and isinstance(module, self._dit_blocks):
             self._progress.block_started()
-        if id(module) in self._trim_before and free_vram_bytes(self._hooks.device) < TRIM_BELOW_FREE_BYTES:
+        if id(module) in self._trim_before and free_vram_bytes(self._hooks.device) < self._trim_threshold:
             torch.cuda.empty_cache()  # under `cudaMallocAsync`: trims the pool to the live blocks (synchronises)
 
     def upscale_images(self, inputs: List[Image.Image], request: UpscaleRequest, force_reload: bool,
@@ -299,7 +323,8 @@ class UpscaleRun:
         change each other's content; the models are loaded once per pass.
 
         After each phase the dropped objects are collected and the allocator's cached VRAM is returned, so the next
-        phase has the most free VRAM and is less likely to spill into shared memory."""
+        phase has the most free VRAM and is less likely to spill into shared memory; under a pool-keeping allocator the
+        decode also returns it before its stages while free VRAM is low."""
         pipeline, settings, plan = self._pipeline, request.settings, request.memory_plan
         runner, ctx = self._prepare_runner(request, debug)
         frames_tensor, _generation_info = pipeline.compute_generation_info(
@@ -336,6 +361,9 @@ class UpscaleRun:
             self._progress.start_phase(DECODE_PHASE)
             if keeps_freed_vram(self._hooks.device):
                 self._trim_before = frozenset(id(stage) for stage in decoder_stages(getattr(runner, "vae", None)))
+                input_height, input_width = img_tensor.shape[1:3]
+                self._trim_threshold = trim_threshold_bytes(settings.tile_size if settings.use_tile_vae else None,
+                                                            target.output_size((input_width, input_height)))
             try:
                 ctx = pipeline.decode_all_batches(runner, ctx=ctx, debug=debug, progress_callback=self.phase_progress,
                                                   cache_model=plan.cache_models)

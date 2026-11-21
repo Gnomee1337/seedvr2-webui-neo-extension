@@ -67,8 +67,11 @@ Live-checked on an 8 GB GPU without bf16, 16 GB RAM, 1080px output, VAE tile 512
   decode now returns the unused pool before each decoder stage while under 3 GB is free (`05-DECISIONS.md`). Live, 3B
   GGUF Q6_K, tile 512/128, img2img ×2, decode with the flag before → after (without the flag): 1024×768 17.5–27.8 s →
   9.0–9.1 s (7.9–8.0 s); 1364×1024 28.8 s → 18.3 s (15.6 s); 2048×2048 112 s → 52 s (42 s); no shared-memory growth.
-  Not measured: 7B, batches, tiles other than 512, GPUs other than 8 GB, the encode phase at large sizes (it reserved
-  4.6 GB for a 2.9 GB peak at 1024×768, no spill). With the old default tile 1024 the decode could run 6–22+ minutes —
+  Not measured: 7B, batches, GPUs other than 8 GB, the encode phase at large sizes (it reserved 4.6 GB for a 2.9 GB
+  peak at 1024×768, no spill), and tiles other than 512 — the 12 / 24 GB profiles use 768 / 1024; the threshold scales
+  with the tile area (an extrapolation). On Linux there is no shared-memory fallback, so the trims there may cost time
+  for nothing (not measured). The decoder and each up block are trimmed right before the next stage too (one extra
+  check each, kept as measured). With the old default tile 1024 the decode could run 6–22+ minutes —
   the reason 512 is the default. The flag makes the 7B DiT step faster with few BlockSwap blocks (8 blocks: 21 s vs 122 s).
 - 🟡 R4 (S2×L2) **7B with too few BlockSwap blocks falls off a cliff.** 7B fp8 on 8 GB: 8 blocks fit only with
   `--cuda-malloc` (0 GB free), 4 blocks spill (297 s). Larger outputs need more blocks. The note recommends 16.
