@@ -64,8 +64,8 @@ Live-checked on an 8 GB GPU without bf16, 16 GB RAM, 1080px output, VAE tile 512
 
 - 🟢 R2 (S2×L1) **The `--cuda-malloc` decode fix is tuned on one 8 GB GPU.** `cudaMallocAsync` keeps every freed
   block, so the tiled decode reserved 8.7 GB for a 5.2 GB peak and Windows paged 1.6–1.8 GB into shared memory. The
-  decode now returns the unused pool before each decoder stage while under 3 GB is free (`05-DECISIONS.md`). Live, 3B
-  GGUF Q6_K, tile 512/128, img2img ×2, decode with the flag before → after (without the flag): 1024×768 17.5–27.8 s →
+  decode now returns the unused pool before each decoder stage while under 3 GiB is free at 512 px tiles
+  (`05-DECISIONS.md`). Live, 3B GGUF Q6_K, tile 512/128, img2img ×2, decode with the flag before → after (without the flag): 1024×768 17.5–27.8 s →
   9.0–9.1 s (7.9–8.0 s); 1364×1024 28.8 s → 18.3 s (15.6 s); 2048×2048 112 s → 52 s (42 s); no shared-memory growth.
   Not measured: 7B, batches, GPUs other than 8 GB, the encode phase at large sizes (it reserved 4.6 GB for a 2.9 GB
   peak at 1024×768, no spill), and tiles other than 512 — the 12 / 24 GB profiles use 768 / 1024; the threshold scales

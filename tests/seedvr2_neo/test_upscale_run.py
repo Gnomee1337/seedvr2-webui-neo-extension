@@ -398,6 +398,8 @@ class Resnet(torch.nn.Module):
 
 
 class UpBlock(torch.nn.Module):
+    """Shaped like the vendored `UpDecoderBlock3D`: resnets, leaf temporal modules, optional upsamplers."""
+
     def __init__(self, upsample=True):
         super().__init__()
         self.resnets = torch.nn.ModuleList([Resnet(), Resnet()])
@@ -428,6 +430,8 @@ class Decoder(torch.nn.Module):
 
 
 class StagedVae(torch.nn.Module):
+    """A VAE whose decoder runs once per tile, through the stages of `Decoder`."""
+
     def __init__(self):
         super().__init__()
         self.decoder = Decoder()
@@ -513,7 +517,7 @@ class StagedPipeline(ModelPipeline):
         return ctx
 
 
-def run_staged(tmp_path, monkeypatch, pipeline, keeps, free_bytes, tile_size=512):
+def run_staged(tmp_path, monkeypatch, pipeline, keeps, free_bytes, tile_size=512, use_tile_vae=True):
     """Runs one 4×4 image (a 1080 × 1080 output) on the host device "gpu-0"; `pipeline.devices_asked` records which
     device the allocator and the free-memory checks were asked about."""
     pipeline.devices_asked = []
@@ -531,7 +535,7 @@ def run_staged(tmp_path, monkeypatch, pipeline, keeps, free_bytes, tile_size=512
     monkeypatch.setattr(torch.cuda, "empty_cache", lambda: pipeline.trims.append(pipeline.phase))
     run, _ = make_tracked_run(pipeline)
     request = make_request(tmp_path)
-    request = replace(request, settings=replace(request.settings, tile_size=tile_size))
+    request = replace(request, settings=replace(request.settings, tile_size=tile_size, use_tile_vae=use_tile_vae))
     return run, run.upscale_images(one_image(), request, False, False)
 
 
@@ -547,6 +551,19 @@ def test_a_larger_tile_returns_the_pool_with_more_vram_still_free(tmp_path, monk
     pipeline = StagedPipeline(tiles=1)
     run_staged(tmp_path, monkeypatch, pipeline, keeps=True, free_bytes=5 * 2**30, tile_size=1024)
     assert pipeline.trims == ["decode"] * 9
+
+
+def test_an_untiled_decode_counts_the_whole_output_as_its_tile(tmp_path, monkeypatch):
+    pipeline = StagedPipeline(tiles=1)
+    run_staged(tmp_path, monkeypatch, pipeline, keeps=True, free_bytes=5 * 2**30, tile_size=512, use_tile_vae=False)
+    assert pipeline.trims == ["decode"] * 9  # a 1080 × 1080 output: about 13 GiB of headroom
+
+
+def test_free_vram_is_the_first_value_the_driver_reports_for_the_device(monkeypatch):
+    asked = []
+    monkeypatch.setattr(torch.cuda, "mem_get_info", lambda device: asked.append(device) or (3, 8))
+    assert upscale_run.free_vram_bytes("cuda:0") == 3
+    assert asked == ["cuda:0"]
 
 
 def test_a_decode_with_enough_free_vram_does_not_return_the_pool(tmp_path, monkeypatch):

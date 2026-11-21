@@ -212,14 +212,14 @@ value either wastes speed or still overflows. The note recommends 16 blocks, the
 allocators (34–42 s). BlockSwap on also moves the VAE to RAM during the DiT step: when VRAM is short, the idle VAE
 should not hold it. The note's threshold (11 GiB) is the 7B fp8 weights (~7.9 GB) plus activations at 1080p.
 
-### With `--cuda-malloc` the decode returns the unused VRAM pool before each decoder stage, under 3 GB free
+### With `--cuda-malloc` the decode returns the unused VRAM pool before each decoder stage when free VRAM is low
 Why: `cudaMallocAsync` never shrinks its pool on its own; during a tiled decode on 8 GB it reserved 8.7 GB for a
 5.2 GB peak and Windows moved the excess into shared memory (decode 2–3× slower). Once per tile still spilled on
 2048²; before each decoder stage did not. The free-memory condition (2 GB still spilled, 3 GB did not) keeps GPUs
 with room to spare from paying the synchronisation; the native allocator never spills here and trimming would only
 slow it (8–20%), so it is left alone. Automatic, no setting: the user cannot choose anything better. The threshold
 grows with the decoded tile's area (larger tiles or no tiling need more headroom); measured only at 512. The flag still
-decodes ~25% slower than the native allocator (2048²: 52 s vs 42 s).
+decodes ~24% slower than the native allocator (2048²: 52 s vs 42 s).
 
 ### VAE tile 512 is the default, on a slider labelled "VAE Tile Size"
 Why: with 1024 and `--cuda-malloc` a VAE phase on an 8 GB GPU could run for many minutes; 512/128 is measured clean
@@ -235,8 +235,8 @@ must use the new one. Any later default change meets the same `ui-config.json` t
 Why: the DiT sees the whole image; 8K is 33 MP, eight times an output that already takes minutes on an 8 GB GPU, and
 the resolution slider would clamp it silently. Offering it would mislead users. Agreed with the owner; DiT tiling is
 deferred to the ideas list (outputs above 2K are rare for the owner; 4K already works), and the larger sizes come with
-it. Until then the scale factor and long edge modes cap the output long edge at 3840 px; the shortest-edge slider keeps its old range (up to 3840 on the shortest edge), so as not to
-change existing users' settings.
+it. Until then the scale factor and long edge modes cap the output long edge at 3840 px; the shortest-edge slider
+keeps its old range (up to 3840 on the shortest edge), so as not to change existing users' settings.
 
 ### Fixed pipeline settings: batch 1, no `torch.compile`
 Why (*reconstructed from code*): the simplest configuration that works without optional packages.

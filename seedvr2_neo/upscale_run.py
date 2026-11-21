@@ -359,12 +359,12 @@ class UpscaleRun:
 
             if not debug_mode: print(f"[SeedVR2] Phase 3/4: Decoding {tiled_note}...")
             self._progress.start_phase(DECODE_PHASE)
-            if keeps_freed_vram(self._hooks.device):
-                self._trim_before = frozenset(id(stage) for stage in decoder_stages(getattr(runner, "vae", None)))
-                input_height, input_width = img_tensor.shape[1:3]
-                self._trim_threshold = trim_threshold_bytes(settings.tile_size if settings.use_tile_vae else None,
-                                                            target.output_size((input_width, input_height)))
             try:
+                if keeps_freed_vram(self._hooks.device):
+                    input_height, input_width = img_tensor.shape[1:3]
+                    self._trim_threshold = trim_threshold_bytes(settings.tile_size if settings.use_tile_vae else None,
+                                                                target.output_size((input_width, input_height)))
+                    self._trim_before = frozenset(id(stage) for stage in decoder_stages(getattr(runner, "vae", None)))
                 ctx = pipeline.decode_all_batches(runner, ctx=ctx, debug=debug, progress_callback=self.phase_progress,
                                                   cache_model=plan.cache_models)
             finally:

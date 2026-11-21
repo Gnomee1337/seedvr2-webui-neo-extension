@@ -116,10 +116,11 @@ them on every run anyway.
   VRAM full in both cases; the image is clean.
   For quick results stay at 2048 or below.
 - **`--cuda-malloc`** in Forge's launch options: its allocator never gives freed VRAM back on its own, so during VAE
-  decoding the extension returns the unused part between decoder stages whenever less than 3 GB of the GPU is free.
+  decoding the extension returns the unused part between decoder stages whenever free VRAM runs low (under 3 GB with
+  the default 512 tiles, more with larger tiles).
   On an 8 GB GPU decoding a 2048×2048 output takes ~52 s with the flag and ~42 s without it (it took ~112 s with the
   flag before, spilling into shared memory). The 7B DiT step with 8 BlockSwap blocks is faster with the flag (21 s vs
-  122 s); with 16 blocks both settings are close. With 3B models the flag brings nothing and decodes ~25% slower.
+  122 s); with 16 blocks both settings are close. With 3B models the flag brings nothing and decodes ~24% slower.
 
 ### API
 
