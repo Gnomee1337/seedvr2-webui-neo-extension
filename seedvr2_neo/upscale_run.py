@@ -175,7 +175,7 @@ class UpscaleRun:
         self._hooks = hooks
         self._progress = RunProgress([1], hooks.report_progress)
         self._dit_blocks: Tuple[type, ...] = ()  # set only while the DiT phase runs
-        self._tile_module_id: Optional[int] = None  # PROTOTYPE: id of the VAE decoder while decoding
+        self._trim_module_ids: frozenset = frozenset()  # PROTOTYPE: ids of decoder stages while decoding
 
     def check_interruption(self) -> None:
         """Stop the run when the user pressed Interrupt. Only Interrupt does: Forge's "Stop generating"
@@ -193,7 +193,7 @@ class UpscaleRun:
         self.check_interruption()
         if self._dit_blocks and isinstance(module, self._dit_blocks):
             self._progress.block_started()
-        if self._tile_module_id is not None and id(module) == self._tile_module_id:
+        if id(module) in self._trim_module_ids:
             torch.cuda.empty_cache()  # PROTOTYPE
 
     def upscale_images(self, inputs: List[Image.Image], request: UpscaleRequest, force_reload: bool,
@@ -293,13 +293,23 @@ class UpscaleRun:
             if not debug_mode: print(f"[SeedVR2] Phase 3/4: Decoding {tiled_note}...")
             self._progress.start_phase(DECODE_PHASE)
             decoder = getattr(getattr(runner, "vae", None), "decoder", None)
-            self._tile_module_id = id(decoder) if decoder is not None else None
-            decoder = None
+            stages = [decoder]
+            if decoder is not None:
+                stages.append(decoder.mid_block)
+                for up_block in decoder.up_blocks:
+                    stages.append(up_block)
+                    stages.extend(up_block.children())
+                    for child in up_block.children():
+                        if isinstance(child, torch.nn.ModuleList):
+                            stages.extend(child)
+            self._trim_module_ids = frozenset(id(m) for m in stages if m is not None)
+            print(f"[SeedVR2] PROTOTYPE trimming before {len(self._trim_module_ids)} decoder stages")
+            decoder = stages = up_block = child = None
             try:
                 ctx = pipeline.decode_all_batches(runner, ctx=ctx, debug=debug, progress_callback=self.phase_progress,
                                                   cache_model=plan.cache_models)
             finally:
-                self._tile_module_id = None
+                self._trim_module_ids = frozenset()
             self._hooks.release_memory()
 
             if not debug_mode: print("[SeedVR2] Phase 4/4: Post-processing...")
